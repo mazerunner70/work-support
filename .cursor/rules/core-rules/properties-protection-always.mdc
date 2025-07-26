@@ -1,0 +1,66 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# Properties Files Protection Rule
+
+## Critical Protection Requirements
+
+- **NEVER** modify, edit, create, or delete any `.properties` files without EXPLICIT USER PERMISSION
+- **ALWAYS** provide a FULL EXPLANATION before any changes:
+  1. What exactly will be changed (show before/after)
+  2. Why the change is necessary
+  3. What impact the change will have on the system
+  4. What risks might be involved
+- **WAIT** for explicit user approval before proceeding with any changes
+- **ASK FIRST** even for seemingly minor changes like formatting or comments
+
+## Protected Files
+
+- `config/team_members.properties` - Team member configuration
+- `config/jira_api_whitelist.properties` - Security whitelist for API endpoints
+- Any other `.properties` files in the config directory
+
+## Required Permission Process
+
+When ANY properties file change is needed:
+
+1. **Current State**: Show existing configuration
+2. **Proposed Changes**: Exact modifications to be made
+3. **Justification**: Business reason for the change
+4. **Impact Analysis**: How this affects application behavior
+5. **Security Implications**: Any security considerations
+6. **Rollback Plan**: How to undo the change if needed
+
+## Example Request Format
+
+```
+🔒 PROPERTIES FILE CHANGE REQUEST
+
+File: config/jira_api_whitelist.properties
+Action: Add new endpoint
+
+CURRENT STATE:
+[show current relevant section]
+
+PROPOSED CHANGES:
+[show exact changes to be made]
+
+JUSTIFICATION:
+[explain why this change is needed]
+
+IMPACT ANALYSIS:
+[explain how this affects the application]
+
+SECURITY IMPLICATIONS:
+[any security considerations]
+
+ROLLBACK PLAN:
+[how to undo if needed]
+
+❓ Do you approve this change? (YES/NO)
+```
+
+**Remember**: These rules exist to protect critical system configuration and maintain security. When in doubt, always ask for permission first.

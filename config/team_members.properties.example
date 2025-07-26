@@ -1,0 +1,30 @@
+# Team Members Configuration Example
+# Copy this file to team_members.properties and update with your actual values
+# Format: team.member.{unique_id}.{property}=value
+
+[DEFAULT]
+
+# Example Team Member 1
+team.member.john.doe.name=John Doe
+team.member.john.doe.jira_id=john.doe@company.com
+team.member.john.doe.github_id=john-doe
+
+# Example Team Member 2  
+team.member.jane.smith.name=Jane Smith
+team.member.jane.smith.jira_id=jane.smith@company.com
+team.member.jane.smith.github_id=jane-smith
+
+# Jira Configuration
+jira.base_url=https://your-company.atlassian.net
+jira.api_token=your_jira_api_token_here
+jira.email=your-email@company.com
+jira.issue_label=work-support
+
+# GitHub Configuration  
+github.api_token=your_github_token_here
+github.issue_label=work-support
+
+# Harvesting Configuration
+harvest.interval_hours=2
+harvest.retention_days=90
+harvest.max_issues_per_member=100 
