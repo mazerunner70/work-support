@@ -48,6 +48,7 @@ class IssueSchema(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     harvested_at: Optional[datetime] = None
+    blacklist_reason: Optional[str] = None  # Reason issue was blacklisted, None if allowed
 
     class Config:
         from_attributes = True

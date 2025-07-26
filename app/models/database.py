@@ -60,6 +60,7 @@ class Issue(Base):
     created_at = Column(DateTime)
     updated_at = Column(DateTime)
     harvested_at = Column(DateTime, default=func.current_timestamp())
+    blacklist_reason = Column(String)  # Reason issue was blacklisted, NULL if allowed
 
     # Relationship to issue type
     issue_type = relationship("IssueType", back_populates="issues")

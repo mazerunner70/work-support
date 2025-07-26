@@ -25,6 +25,167 @@ class HierarchyService:
         self.issue_type_by_id = {it.id: it for it in ISSUE_TYPES}
         self.issue_type_by_name = {it.name: it for it in ISSUE_TYPES}
 
+    async def harvest_hierarchical_issues_layered(self, projects: List[str], label: str, 
+                                                 max_depth: int = 5) -> List[JiraIssue]:
+        """
+        Harvest issues using layered traversal - processes all issues in each layer before moving to the next.
+        
+        Layer 0: Gets ONLY Product Version issues (specific type filtering)
+        Layer 1+: Gets ALL children regardless of issue type, using max_depth limit for safety
+        
+        This is more efficient than recursive traversal as it batches API calls per layer.
+        
+        Args:
+            projects: List of project keys to search in
+            label: Label to filter by (e.g., 'SE_product_family')
+            max_depth: Maximum depth to traverse (default: 5 iterations to prevent infinite loops)
+            
+        Returns:
+            List of all harvested issues
+            
+        Raises:
+            HierarchyServiceError: If harvesting fails
+        """
+        try:
+            all_issues = []
+            processed_keys = set()  # Track processed issues to avoid duplicates
+            
+            logger.info(f"Starting layered hierarchical harvest for projects {projects} with label '{label}'")
+            
+            # Layer 0: Get ONLY Product Version issues (specific type filtering)
+            current_layer = await self.jira_service.search_product_versions(projects, label)
+            logger.info(f"Layer 0 (Product Versions ONLY): Found {len(current_layer)} Product Version issues")
+            
+            layer_depth = 0
+            
+            while current_layer and layer_depth < max_depth:
+                logger.info(f"Processing layer {layer_depth} with {len(current_layer)} issues")
+                
+                # Add current layer issues to results (if not already processed)
+                layer_added = 0
+                for issue in current_layer:
+                    if issue.key not in processed_keys:
+                        all_issues.append(issue)
+                        processed_keys.add(issue.key)
+                        layer_added += 1
+                
+                logger.info(f"Added {layer_added} new issues from layer {layer_depth}")
+                
+                # Prepare for next layer - collect ALL children of current layer (any type)
+                next_layer = await self._get_children_for_layer(current_layer, processed_keys)
+                
+                if not next_layer:
+                    logger.info(f"No children found at layer {layer_depth + 1}, stopping traversal")
+                    break
+                
+                logger.info(f"Layer {layer_depth + 1} (ALL child types): Found {len(next_layer)} child issues")
+                current_layer = next_layer
+                layer_depth += 1
+            
+            if layer_depth >= max_depth:
+                logger.warning(f"Maximum depth {max_depth} reached, stopping traversal")
+            
+            logger.info(f"Layered hierarchical harvest completed. "
+                       f"Processed {layer_depth + 1} layers. "
+                       f"Total issues collected: {len(all_issues)}")
+            return all_issues
+            
+        except JiraServiceError as e:
+            error_msg = f"Jira service error during layered hierarchical harvest: {e}"
+            logger.error(error_msg)
+            raise HierarchyServiceError(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error during layered hierarchical harvest: {e}"
+            logger.error(error_msg)
+            raise HierarchyServiceError(error_msg)
+
+    async def _get_children_for_layer(self, parent_issues: List[JiraIssue], 
+                                     processed_keys: Set[str]) -> List[JiraIssue]:
+        """
+        Get all children for a layer of parent issues using batched JQL queries.
+        Splits large parent lists into batches to avoid JQL IN clause size limits.
+        Gets ALL children regardless of issue type - relies on iteration limit for safety.
+        
+        Args:
+            parent_issues: List of parent issues to get children for
+            processed_keys: Set of already processed issue keys to avoid duplicates
+            
+        Returns:
+            List of all child issues for this layer
+        """
+        if not parent_issues:
+            return []
+        
+        # Extract parent keys, excluding blacklisted issues
+        parent_keys = [issue.key for issue in parent_issues if not issue.blacklist_reason]
+        
+        if len(parent_keys) < len(parent_issues):
+            logger.debug(f"Filtered out {len(parent_issues) - len(parent_keys)} blacklisted parent issues")
+        
+        if not parent_keys:
+            logger.debug("No valid parent keys remaining after blacklist filtering")
+            return []
+        
+        # Batch size to prevent JQL IN clause from getting too large
+        # JIRA typically handles up to ~100 items in IN clauses comfortably
+        batch_size = 100
+        all_children = []
+        
+        logger.info(f"Processing {len(parent_keys)} parent keys in batches of {batch_size}")
+        
+        # Process parent keys in batches
+        for i in range(0, len(parent_keys), batch_size):
+            batch_keys = parent_keys[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(parent_keys) + batch_size - 1) // batch_size
+            
+            try:
+                # Build JQL query to get ALL children for this batch of parents
+                jql_query = self.jira_service.jql_builder.build_all_children_query(batch_keys)
+                logger.debug(f"Batch {batch_num}/{total_batches} query ({len(batch_keys)} parents): {jql_query}")
+                
+                # Search for children using the batch query
+                children = await self.jira_service.search_issues(jql_query, max_results=1000)
+                
+                # Filter out already processed issues
+                new_children = [child for child in children if child.key not in processed_keys]
+                all_children.extend(new_children)
+                
+                logger.debug(f"Batch {batch_num}/{total_batches}: Found {len(children)} children ({len(new_children)} new)")
+                
+            except JiraServiceError as e:
+                logger.error(f"Error getting children for batch {batch_num}/{total_batches} "
+                           f"(keys: {batch_keys[:3]}...): {e}")
+                # Continue with other batches even if one fails
+                continue
+        
+        logger.info(f"Completed batched processing: {len(all_children)} total new children found")
+        return all_children
+
+    def _group_parents_by_child_types(self, parent_issues: List[JiraIssue]) -> Dict[tuple, List[str]]:
+        """
+        Group parent issues by their possible child types to optimize batch queries.
+        
+        Args:
+            parent_issues: List of parent issues
+            
+        Returns:
+            Dictionary mapping child type tuples to lists of parent keys
+        """
+        groups = {}
+        
+        for parent in parent_issues:
+            child_type_names = self._get_child_type_names(parent.issue_type_id)
+            child_types_key = tuple(sorted(child_type_names))  # Use tuple as dict key
+            
+            if child_types_key not in groups:
+                groups[child_types_key] = []
+            groups[child_types_key].append(parent.key)
+        
+        return groups
+
+
+
     async def harvest_hierarchical_issues(self, projects: List[str], label: str, 
                                          max_depth: int = 5) -> List[JiraIssue]:
         """

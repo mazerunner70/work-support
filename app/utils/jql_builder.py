@@ -44,6 +44,52 @@ class JQLBuilder:
         return f'parent = "{parent_key}" AND type IN ({types_str})'
 
     @staticmethod
+    def build_batch_children_query(parent_keys: List[str], child_type_names: List[str]) -> str:
+        """
+        Build query for child issues of multiple parents with specific child types.
+        This is used for layered harvesting to batch API calls efficiently.
+        
+        Args:
+            parent_keys: List of parent issue keys (e.g., ['PV-123', 'PV-124', 'PV-125'])
+            child_type_names: List of child issue type names (e.g., ['Feature', 'Customer Adoption'])
+            
+        Returns:
+            JQL query string
+        """
+        if not parent_keys or not child_type_names:
+            return ""
+        
+        # Escape parent keys and child type names
+        escaped_parents = [f'"{key}"' for key in parent_keys]
+        escaped_types = [f'"{type_name}"' for type_name in child_type_names]
+        
+        parents_str = ", ".join(escaped_parents)
+        types_str = ", ".join(escaped_types)
+        
+        return f'parent IN ({parents_str}) AND type IN ({types_str})'
+
+    @staticmethod
+    def build_all_children_query(parent_keys: List[str]) -> str:
+        """
+        Build query for ALL child issues of multiple parents without type filtering.
+        This is used for the simplified layered harvesting approach.
+        
+        Args:
+            parent_keys: List of parent issue keys (e.g., ['PV-123', 'PV-124', 'PV-125'])
+            
+        Returns:
+            JQL query string
+        """
+        if not parent_keys:
+            return ""
+        
+        # Escape parent keys
+        escaped_parents = [f'"{key}"' for key in parent_keys]
+        parents_str = ", ".join(escaped_parents)
+        
+        return f'parent IN ({parents_str})'
+
+    @staticmethod
     def build_assignee_filter_query(base_query: str, assignee_email: str) -> str:
         """
         Add assignee filter to an existing query.

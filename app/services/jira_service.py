@@ -32,6 +32,7 @@ class JiraIssue(BaseModel):
     end_date: Optional[datetime] = None  # End date from customfield_13647
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
+    blacklist_reason: Optional[str] = None  # Reason issue was blacklisted, None if allowed
 
 
 class JiraServiceError(Exception):
@@ -236,13 +237,13 @@ class JiraService:
             }
         return endpoints_info
 
-    async def search_issues(self, jql_query: str, max_results: int = 100) -> List[JiraIssue]:
+    async def search_issues(self, jql_query: str, max_results: int = 1000) -> List[JiraIssue]:
         """
-        Search for issues using JQL query.
+        Search for issues using JQL query with pagination support.
         
         Args:
             jql_query: JQL query string
-            max_results: Maximum number of results to return
+            max_results: Maximum total results to return (default 1000, 0 = no limit)
             
         Returns:
             List of JiraIssue objects
@@ -255,45 +256,79 @@ class JiraService:
             if not self.jql_builder.validate_jql_syntax(jql_query):
                 raise JiraServiceError(f"Invalid JQL syntax: {jql_query}")
 
-            payload = {
-                "jql": jql_query,
-                "maxResults": max_results,
-                "fields": [
-                    "key", "summary", "assignee", "status", "labels",
-                    "issuetype", "parent", "created", "updated"
-                ]
-            }
-            
-            response = await self._make_request("POST", "search", payload, timeout=60.0)
-            data = self._handle_response(
-                response, 
-                "issue search",
-                f"Successfully retrieved issues from Jira for query: {jql_query}"
-            )
-            
-            issues = []
+            all_issues = []
             blacklisted_count = 0
+            start_at = 0
+            page_size = 100  # JIRA's recommended page size
             
-            for issue_data in data.get("issues", []):
-                try:
-                    issue_key = issue_data.get('key', '')
-                    
-                    # Check if issue is blacklisted
-                    if config_manager.is_project_blacklisted(issue_key):
-                        blacklisted_count += 1
-                        logger.debug(f"Skipping blacklisted issue: {issue_key}")
+            while True:
+                payload = {
+                    "jql": jql_query,
+                    "startAt": start_at,
+                    "maxResults": page_size,
+                    "fields": [
+                        "key", "summary", "assignee", "status", "labels",
+                        "issuetype", "parent", "created", "updated",
+                        "customfield_10001",  # Team field
+                        "customfield_14339",  # Start date
+                        "customfield_14343",  # Transition date  
+                        "customfield_13647"   # End date
+                    ]
+                }
+                
+                response = await self._make_request("POST", "search", payload, timeout=60.0)
+                data = self._handle_response(
+                    response, 
+                    "issue search",
+                    f"Retrieved page {start_at//page_size + 1} from Jira for query: {jql_query}"
+                )
+                
+                page_issues = []
+                for issue_data in data.get("issues", []):
+                    try:
+                        issue_key = issue_data.get('key', '')
+                        jira_issue = self._parse_issue(issue_data)
+                        
+                        # Determine blacklist reason
+                        blacklist_reason = None
+                        if config_manager.is_project_blacklisted(issue_key):
+                            blacklist_reason = "project"
+                        elif jira_issue.team and config_manager.is_team_blacklisted(jira_issue.team):
+                            blacklist_reason = f"team:{jira_issue.team}"
+                        elif config_manager.is_status_blacklisted(jira_issue.status):
+                            blacklist_reason = f"status:{jira_issue.status}"
+                        
+                        # Set blacklist reason on issue
+                        jira_issue.blacklist_reason = blacklist_reason
+                        
+                        # Skip blacklisted issues
+                        if blacklist_reason:
+                            blacklisted_count += 1
+                            logger.debug(f"Skipping blacklisted issue: {issue_key} (reason: {blacklist_reason})")
+                            continue
+                        
+                        page_issues.append(jira_issue)
+                    except Exception as e:
+                        logger.warning(f"Error parsing issue {issue_data.get('key', 'Unknown')}: {e}")
                         continue
-                    
-                    jira_issue = self._parse_issue(issue_data)
-                    issues.append(jira_issue)
-                except Exception as e:
-                    logger.warning(f"Error parsing issue {issue_data.get('key', 'Unknown')}: {e}")
-                    continue
+                
+                all_issues.extend(page_issues)
+                
+                # Check if we have more pages and haven't hit our limit
+                total = data.get("total", 0)
+                start_at += page_size
+                
+                if start_at >= total or (max_results > 0 and len(all_issues) >= max_results):
+                    break
+            
+            # Trim to max_results if specified
+            if max_results > 0 and len(all_issues) > max_results:
+                all_issues = all_issues[:max_results]
             
             if blacklisted_count > 0:
                 logger.info(f"Filtered out {blacklisted_count} blacklisted issues")
-            logger.info(f"Successfully parsed {len(issues)} issues")
-            return issues
+            logger.info(f"Successfully parsed {len(all_issues)} issues from {total} total found")
+            return all_issues
                     
         except (JiraServiceError, JiraEndpointNotWhitelistedError):
             raise

@@ -114,7 +114,8 @@ class HarvestService:
 
     async def _harvest_hierarchical_issues(self) -> int:
         """
-        Harvest issues using hierarchical traversal.
+        Harvest issues using layered hierarchical traversal.
+        This new approach processes issues layer by layer for better efficiency.
         
         Returns:
             Number of issues processed
@@ -129,23 +130,23 @@ class HarvestService:
                 label = "SE_product_family"
                 logger.info(f"Using hierarchical label 'SE_product_family' instead of default")
 
-            logger.info(f"Harvesting hierarchical issues from projects: {projects}")
+            logger.info(f"Harvesting hierarchical issues from projects: {projects} using LAYERED approach (Layer 0: Product Versions only, Layer 1+: all child types, 5-iteration limit)")
             
-            # Get all issues in the hierarchy
-            issues = await self.hierarchy_service.harvest_hierarchical_issues(projects, label)
+            # Get all issues in the hierarchy using the new layered approach
+            issues = await self.hierarchy_service.harvest_hierarchical_issues_layered(projects, label)
             
             # Store issues in database
             records_stored = self._store_issues_in_database(issues, "jira")
             
-            logger.info(f"Hierarchical harvest: {len(issues)} fetched, {records_stored} stored")
+            logger.info(f"Layered hierarchical harvest: {len(issues)} fetched, {records_stored} stored")
             return records_stored
 
         except (JiraServiceError, HierarchyServiceError) as e:
-            logger.error(f"Error in hierarchical harvest: {e}")
+            logger.error(f"Error in layered hierarchical harvest: {e}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error in hierarchical harvest: {e}")
-            raise HarvestServiceError(f"Hierarchical harvest failed: {e}")
+            logger.error(f"Unexpected error in layered hierarchical harvest: {e}")
+            raise HarvestServiceError(f"Layered hierarchical harvest failed: {e}")
 
     async def _harvest_team_member_issues(self) -> int:
         """
