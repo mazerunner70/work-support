@@ -13,6 +13,19 @@ class JiraCommentSchema(BaseModel):
     updated: Optional[datetime] = None
 
 
+class CommentSchema(BaseModel):
+    """Comment schema for database model."""
+    id: Optional[int] = None
+    issue_key: str
+    body: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    jira_comment_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class TeamMemberSchema(BaseModel):
     """Team member schema."""
     id: Optional[int] = None
@@ -41,6 +54,7 @@ class IssueSchema(BaseModel):
     """Issue schema."""
     id: Optional[int] = None
     issue_key: str
+    issue_id: Optional[str] = None  # Jira issue ID from the "id" field
     summary: Optional[str] = None
     assignee: Optional[str] = None
     status: Optional[str] = None
@@ -56,7 +70,8 @@ class IssueSchema(BaseModel):
     updated_at: Optional[datetime] = None
     harvested_at: Optional[datetime] = None
     blacklist_reason: Optional[str] = None  # Reason issue was blacklisted, None if allowed
-    comments: List[JiraCommentSchema] = Field(default_factory=list)  # Issue comments
+    comments: List[JiraCommentSchema] = Field(default_factory=list)  # DEPRECATED: Use comment_records instead
+    comment_records: List['CommentSchema'] = Field(default_factory=list)  # Comments from separate table
 
     class Config:
         from_attributes = True
@@ -146,3 +161,4 @@ class ErrorResponse(BaseModel):
 
 # Update forward references
 IssueHierarchySchema.model_rebuild()
+IssueSchema.model_rebuild()

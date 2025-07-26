@@ -11,7 +11,7 @@ from app.config.settings import config_manager
 from app.services.jira_service import jira_service, JiraIssue, JiraServiceError
 from app.services.hierarchy_service import hierarchy_service, HierarchyServiceError
 from app.services.database_service import db_service
-from app.models.database import Issue, HarvestJob
+from app.models.database import Issue, HarvestJob, Comment
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,7 @@ class HarvestService:
                         if existing_issue:
                             # Update existing issue
                             existing_issue.summary = jira_issue.summary
+                            existing_issue.issue_id = jira_issue.issue_id
                             existing_issue.assignee = jira_issue.assignee
                             existing_issue.status = jira_issue.status
                             existing_issue.labels = json.dumps(jira_issue.labels)
@@ -233,13 +234,17 @@ class HarvestService:
                             existing_issue.created_at = jira_issue.created
                             existing_issue.updated_at = jira_issue.updated
                             existing_issue.harvested_at = datetime.utcnow()
-                            existing_issue.comments = json.dumps([comment.model_dump() for comment in jira_issue.comments], default=str)
+                            # Comments are now handled separately
+                            
+                            # Save comments to separate table
+                            self._save_comments_to_table(db, jira_issue.key, jira_issue.comments)
                             
                             logger.debug(f"Updated existing issue: {jira_issue.key}")
                         else:
                             # Create new issue
                             new_issue = Issue(
                                 issue_key=jira_issue.key,
+                                issue_id=jira_issue.issue_id,
                                 summary=jira_issue.summary,
                                 assignee=jira_issue.assignee,
                                 status=jira_issue.status,
@@ -253,10 +258,13 @@ class HarvestService:
                                 end_date=jira_issue.end_date,
                                 created_at=jira_issue.created,
                                 updated_at=jira_issue.updated,
-                                harvested_at=datetime.utcnow(),
-                                comments=json.dumps([comment.model_dump() for comment in jira_issue.comments], default=str)
+                                harvested_at=datetime.utcnow()
+                                # Comments are now handled separately
                             )
                             db.add(new_issue)
+                            
+                            # Save comments to separate table
+                            self._save_comments_to_table(db, jira_issue.key, jira_issue.comments)
                             
                             logger.debug(f"Created new issue: {jira_issue.key}")
 
@@ -370,6 +378,27 @@ class HarvestService:
             logger.error(f"Error in connectivity test: {e}")
             result["error"] = str(e)
             return result
+
+    def _save_comments_to_table(self, db, issue_key: str, jira_comments: List) -> None:
+        """Save comments to the separate comments table."""
+        try:
+            # Delete existing comments for this issue
+            db.query(Comment).filter(Comment.issue_key == issue_key).delete()
+            
+            # Add new comments
+            for comment in jira_comments:
+                if comment.body:  # Only save comments with content
+                    new_comment = Comment(
+                        issue_key=issue_key,
+                        body=comment.body,
+                        created_at=comment.created,
+                        updated_at=comment.updated,
+                        jira_comment_id=getattr(comment, 'id', None)  # If comment has an ID
+                    )
+                    db.add(new_comment)
+                    
+        except Exception as e:
+            logger.error(f"Error saving comments for issue {issue_key}: {e}")
 
 
 # Global instance

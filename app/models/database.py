@@ -1,7 +1,7 @@
 """
 Database models for the Work Support Python Server.
 """
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -40,12 +40,38 @@ class IssueType(Base):
         return f"<IssueType(id={self.id}, name='{self.name}')>"
 
 
+class Comment(Base):
+    """Comments table for issue comments."""
+    __tablename__ = "comments"
+    __table_args__ = (
+        Index('ix_comments_created_at', 'created_at'),
+        Index('ix_comments_issue_created', 'issue_key', 'created_at'),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_key = Column(String, ForeignKey('issues.issue_key'), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime)
+    jira_comment_id = Column(String)  # Original Jira comment ID for tracking
+
+    # Relationship to issue
+    issue = relationship("Issue", back_populates="comment_records")
+
+    def __repr__(self):
+        return f"<Comment(issue_key='{self.issue_key}', created_at='{self.created_at}')>"
+
+
 class Issue(Base):
     """Issues table."""
     __tablename__ = "issues"
+    __table_args__ = (
+        Index('ix_issues_issue_id', 'issue_id'),  # Index for issue_id lookups
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     issue_key = Column(String, nullable=False, unique=True)
+    issue_id = Column(String)  # Jira issue ID from the "id" field  
     summary = Column(String)
     assignee = Column(String)
     status = Column(String)
@@ -61,10 +87,11 @@ class Issue(Base):
     updated_at = Column(DateTime)
     harvested_at = Column(DateTime, default=func.current_timestamp())
     blacklist_reason = Column(String)  # Reason issue was blacklisted, NULL if allowed
-    comments = Column(Text)  # JSON array of comments with body, created, updated
+    comments = Column(Text)  # JSON array of comments with body, created, updated - DEPRECATED, use comment_records
 
-    # Relationship to issue type
+    # Relationships
     issue_type = relationship("IssueType", back_populates="issues")
+    comment_records = relationship("Comment", back_populates="issue", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Issue(key='{self.issue_key}', summary='{self.summary}', source='{self.source}')>"

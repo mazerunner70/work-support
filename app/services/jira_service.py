@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 class JiraIssue(BaseModel):
     """Represents a Jira issue with relevant fields."""
     key: str
+    issue_id: Optional[str] = None  # Maps to "id" field in response
     summary: str
     assignee: Optional[str] = None
     status: str
@@ -387,6 +388,7 @@ class JiraService:
         
         return JiraIssue(
             key=issue_data.get("key", ""),
+            issue_id=issue_data.get("id"),
             summary=fields.get("summary", ""),
             assignee=assignee,
             status=fields.get("status", {}).get("name", "Unknown"),
