@@ -62,11 +62,64 @@ class Comment(Base):
         return f"<Comment(issue_key='{self.issue_key}', created_at='{self.created_at}')>"
 
 
+class Changelog(Base):
+    """Changelog table for issue change history."""
+    __tablename__ = "changelogs"
+    __table_args__ = (
+        Index('ix_changelogs_created_at', 'created_at'),
+        Index('ix_changelogs_issue_created', 'issue_id', 'created_at'),
+        Index('ix_changelogs_field', 'field_name'),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_id = Column(String, ForeignKey('issues.issue_id'), nullable=False)  # Maps to Jira issueId
+    jira_changelog_id = Column(String, nullable=False)  # Jira changelog ID
+    field_name = Column(String, nullable=False)  # Field that changed (status, assignee, etc.)
+    from_value = Column(Text)  # Previous value
+    to_value = Column(Text)  # New value
+    from_display = Column(Text)  # Human-readable previous value
+    to_display = Column(Text)  # Human-readable new value
+    created_at = Column(DateTime, nullable=False)  # When change occurred
+    harvested_at = Column(DateTime, default=func.current_timestamp())
+
+    # Relationship to issue via issue_id
+    issue = relationship("Issue", back_populates="changelog_records", foreign_keys=[issue_id])
+
+    def __repr__(self):
+        return f"<Changelog(issue_id='{self.issue_id}', field='{self.field_name}', created_at='{self.created_at}')>"
+
+
+class ChangesLog(Base):
+    """Changes log table for tracking all system changes."""
+    __tablename__ = "changes_log"
+    __table_args__ = (
+        Index('ix_changes_log_timestamp', 'timestamp'),
+        Index('ix_changes_log_issue_timestamp', 'issue_key', 'timestamp'),
+        Index('ix_changes_log_field', 'field_name'),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_key = Column(String, ForeignKey('issues.issue_key'), nullable=False)
+    timestamp = Column(DateTime, default=func.current_timestamp(), nullable=False)
+    field_name = Column(String, nullable=False)  # Field that changed (status, assignee, comments, changelogs, etc.)
+    updated_value = Column(Text)  # New value as string
+    change_type = Column(String, nullable=False)  # 'field_update', 'comment_added', 'changelog_added'
+
+    # Relationship to issue
+    issue = relationship("Issue", back_populates="changes_log_records")
+
+    def __repr__(self):
+        return f"<ChangesLog(issue_key='{self.issue_key}', field='{self.field_name}', timestamp='{self.timestamp}')>"
+
+
 class Issue(Base):
     """Issues table."""
     __tablename__ = "issues"
     __table_args__ = (
         Index('ix_issues_issue_id', 'issue_id'),  # Index for issue_id lookups
+        Index('ix_issues_start_date', 'start_date'),  # Index for start date queries
+        Index('ix_issues_transition_date', 'transition_date'),  # Index for transition date queries
+        Index('ix_issues_end_date', 'end_date'),  # Index for end date queries
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -92,6 +145,8 @@ class Issue(Base):
     # Relationships
     issue_type = relationship("IssueType", back_populates="issues")
     comment_records = relationship("Comment", back_populates="issue", cascade="all, delete-orphan")
+    changelog_records = relationship("Changelog", back_populates="issue", cascade="all, delete-orphan", foreign_keys="[Changelog.issue_id]")
+    changes_log_records = relationship("ChangesLog", back_populates="issue", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Issue(key='{self.issue_key}', summary='{self.summary}', source='{self.source}')>"

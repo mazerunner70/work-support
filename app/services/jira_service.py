@@ -1,6 +1,7 @@
 """
 Jira API integration service for data harvesting.
 """
+import asyncio
 import logging
 import json
 import re
@@ -588,6 +589,67 @@ class JiraService:
         jql_query = self.jql_builder.build_team_member_query(assignee_email, label, issue_types)
         logger.info(f"Searching for issues assigned to {assignee_email} with JQL: {jql_query}")
         return await self.search_issues(jql_query)
+
+    async def bulk_fetch_changelogs(self, issue_ids: List[str], chunk_size: int = 100) -> List[Dict[str, Any]]:
+        """
+        Bulk fetch changelogs for multiple issues efficiently.
+        
+        Args:
+            issue_ids: List of Jira issue IDs to fetch changelogs for
+            chunk_size: Number of issues to process per API call (max 100)
+            
+        Returns:
+            List of changelog data from Jira API
+        """
+        if not issue_ids:
+            return []
+            
+        endpoint = "changelog/bulkfetch"
+        method = "POST"
+        
+        # Validate endpoint
+        self._validate_endpoint(endpoint, method)
+        
+        all_changelogs = []
+        
+        # Process in chunks to respect API limits
+        for i in range(0, len(issue_ids), chunk_size):
+            chunk = issue_ids[i:i + chunk_size]
+            
+            payload = {
+                "issueIds": chunk
+            }
+            
+            logger.info(f"Fetching changelogs for {len(chunk)} issues (chunk {i//chunk_size + 1})")
+            
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    url = self._build_api_url(endpoint)
+                    headers = self._get_auth_headers()
+                    
+                    response = await client.post(url, headers=headers, json=payload)
+                    response.raise_for_status()
+                    
+                    chunk_data = response.json()
+                    
+                    # Extract changelog data
+                    if "values" in chunk_data:
+                        all_changelogs.extend(chunk_data["values"])
+                    
+                    # Rate limiting - small delay between chunks
+                    if i + chunk_size < len(issue_ids):
+                        await asyncio.sleep(0.1)
+                        
+            except httpx.HTTPStatusError as e:
+                logger.error(f"HTTP error fetching changelogs for chunk {i//chunk_size + 1}: {e}")
+                # Continue with next chunk rather than failing entirely
+                continue
+            except Exception as e:
+                logger.error(f"Error fetching changelogs for chunk {i//chunk_size + 1}: {e}")
+                continue
+        
+        logger.info(f"Successfully fetched changelogs for {len(all_changelogs)} issue/changelog combinations")
+        return all_changelogs
 
 
 # Global instance

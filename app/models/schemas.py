@@ -26,6 +26,36 @@ class CommentSchema(BaseModel):
         from_attributes = True
 
 
+class ChangelogSchema(BaseModel):
+    """Changelog schema for database model."""
+    id: Optional[int] = None
+    issue_id: str
+    jira_changelog_id: str
+    field_name: str
+    from_value: Optional[str] = None
+    to_value: Optional[str] = None
+    from_display: Optional[str] = None
+    to_display: Optional[str] = None
+    created_at: datetime
+    harvested_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChangesLogSchema(BaseModel):
+    """Changes log schema for database model."""
+    id: Optional[int] = None
+    issue_key: str
+    timestamp: datetime
+    field_name: str
+    updated_value: Optional[str] = None
+    change_type: str
+
+    class Config:
+        from_attributes = True
+
+
 class TeamMemberSchema(BaseModel):
     """Team member schema."""
     id: Optional[int] = None
@@ -72,6 +102,8 @@ class IssueSchema(BaseModel):
     blacklist_reason: Optional[str] = None  # Reason issue was blacklisted, None if allowed
     comments: List[JiraCommentSchema] = Field(default_factory=list)  # DEPRECATED: Use comment_records instead
     comment_records: List['CommentSchema'] = Field(default_factory=list)  # Comments from separate table
+    changelog_records: List['ChangelogSchema'] = Field(default_factory=list)  # Changelogs from separate table
+    changes_log_records: List['ChangesLogSchema'] = Field(default_factory=list)  # System changes log
 
     class Config:
         from_attributes = True

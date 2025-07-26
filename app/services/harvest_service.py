@@ -4,14 +4,14 @@ Main data harvesting orchestration service.
 import logging
 import json
 import time
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from datetime import datetime
 
 from app.config.settings import config_manager
 from app.services.jira_service import jira_service, JiraIssue, JiraServiceError
 from app.services.hierarchy_service import hierarchy_service, HierarchyServiceError
 from app.services.database_service import db_service
-from app.models.database import Issue, HarvestJob, Comment
+from app.models.database import Issue, HarvestJob, Comment, Changelog, ChangesLog
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,11 @@ class HarvestService:
             team_member_records = await self._harvest_team_member_issues()
             total_records += team_member_records
             logger.info(f"✅ PHASE 2 COMPLETED - {team_member_records} team member issues processed")
+
+            # Phase 3: Bulk changelog harvest for non-blacklisted issues
+            logger.info("📝 PHASE 3 - Bulk changelog harvest starting...")
+            changelog_records = await self._harvest_changelogs_bulk()
+            logger.info(f"✅ PHASE 3 COMPLETED - {changelog_records} changelog entries processed")
 
             # Complete harvest job
             self._complete_harvest_job(harvest_job_id, total_records)
@@ -219,6 +224,9 @@ class HarvestService:
                         ).first()
 
                         if existing_issue:
+                            # Compare and log field changes before updating
+                            self._compare_and_log_field_changes(db, existing_issue, jira_issue, jira_issue.key)
+                            
                             # Update existing issue
                             existing_issue.summary = jira_issue.summary
                             existing_issue.issue_id = jira_issue.issue_id
@@ -262,6 +270,9 @@ class HarvestService:
                                 # Comments are now handled separately
                             )
                             db.add(new_issue)
+                            
+                            # Log creation of new issue
+                            self._log_change(db, jira_issue.key, 'issue_created', 'New issue created', 'field_update')
                             
                             # Save comments to separate table
                             self._save_comments_to_table(db, jira_issue.key, jira_issue.comments)
@@ -383,9 +394,11 @@ class HarvestService:
         """Save comments to the separate comments table."""
         try:
             # Delete existing comments for this issue
+            deleted_count = db.query(Comment).filter(Comment.issue_key == issue_key).count()
             db.query(Comment).filter(Comment.issue_key == issue_key).delete()
             
-            # Add new comments
+            # Add new comments and log each one
+            comment_count = 0
             for comment in jira_comments:
                 if comment.body:  # Only save comments with content
                     new_comment = Comment(
@@ -396,9 +409,170 @@ class HarvestService:
                         jira_comment_id=getattr(comment, 'id', None)  # If comment has an ID
                     )
                     db.add(new_comment)
+                    comment_count += 1
+            
+            # Log comment changes
+            if comment_count > 0:
+                self._log_change(db, issue_key, 'comments', f'{comment_count} comments processed', 'comment_added')
                     
         except Exception as e:
             logger.error(f"Error saving comments for issue {issue_key}: {e}")
+
+    def _log_change(self, db, issue_key: str, field_name: str, updated_value: str, change_type: str) -> None:
+        """Log a change to the changes_log table."""
+        try:
+            change_entry = ChangesLog(
+                issue_key=issue_key,
+                field_name=field_name,
+                updated_value=updated_value,
+                change_type=change_type
+            )
+            db.add(change_entry)
+        except Exception as e:
+            logger.error(f"Error logging change for issue {issue_key}, field {field_name}: {e}")
+
+    def _compare_and_log_field_changes(self, db, existing_issue: Issue, jira_issue, issue_key: str) -> None:
+        """Compare existing issue with new data and log any field changes."""
+        try:
+            # Define fields to check for changes
+            field_mappings = {
+                'summary': (existing_issue.summary, jira_issue.summary),
+                'assignee': (existing_issue.assignee, jira_issue.assignee),
+                'status': (existing_issue.status, jira_issue.status),
+                'labels': (existing_issue.labels, json.dumps(jira_issue.labels)),
+                'team': (existing_issue.team, jira_issue.team),
+                'start_date': (str(existing_issue.start_date) if existing_issue.start_date else None, 
+                              str(jira_issue.start_date) if jira_issue.start_date else None),
+                'transition_date': (str(existing_issue.transition_date) if existing_issue.transition_date else None, 
+                                   str(jira_issue.transition_date) if jira_issue.transition_date else None),
+                'end_date': (str(existing_issue.end_date) if existing_issue.end_date else None, 
+                            str(jira_issue.end_date) if jira_issue.end_date else None)
+            }
+            
+            for field_name, (old_value, new_value) in field_mappings.items():
+                if old_value != new_value:
+                    self._log_change(db, issue_key, field_name, str(new_value) if new_value else '', 'field_update')
+                    
+        except Exception as e:
+            logger.error(f"Error comparing field changes for issue {issue_key}: {e}")
+
+    async def _harvest_changelogs_bulk(self) -> int:
+        """
+        Bulk harvest changelogs for all non-blacklisted issues.
+        
+        Returns:
+            Number of changelog entries processed
+        """
+        try:
+            # Get all non-blacklisted issues with issue_id
+            with self.db_service.get_db_session() as db:
+                issues = db.query(Issue).filter(
+                    Issue.blacklist_reason.is_(None),  # Not blacklisted
+                    Issue.issue_id.isnot(None),  # Has Jira issue ID
+                    Issue.issue_id != ""  # Issue ID is not empty
+                ).all()
+                
+                issue_ids = [issue.issue_id for issue in issues]
+                
+            if not issue_ids:
+                logger.info("No non-blacklisted issues found for changelog harvest")
+                return 0
+                
+            logger.info(f"Fetching changelogs for {len(issue_ids)} non-blacklisted issues")
+            
+            # Bulk fetch changelogs from Jira
+            changelog_data = await self.jira_service.bulk_fetch_changelogs(issue_ids)
+            
+            if not changelog_data:
+                logger.info("No changelog data returned from Jira")
+                return 0
+            
+            # Process and store changelogs
+            return self._store_changelogs_in_database(changelog_data)
+            
+        except Exception as e:
+            logger.error(f"Error in bulk changelog harvest: {e}")
+            # Don't fail the entire harvest for changelog issues
+            return 0
+
+    def _store_changelogs_in_database(self, changelog_data: List[Dict[str, Any]]) -> int:
+        """
+        Store changelog data in the database.
+        
+        Args:
+            changelog_data: List of changelog data from Jira API
+            
+        Returns:
+            Number of changelog entries stored
+        """
+        if not changelog_data:
+            return 0
+            
+        stored_count = 0
+        
+        try:
+            with self.db_service.get_db_session() as db:
+                for changelog_item in changelog_data:
+                    try:
+                        issue_id = changelog_item.get("issueId")
+                        if not issue_id:
+                            continue
+                            
+                        # Delete existing changelogs for this issue
+                        db.query(Changelog).filter(Changelog.issue_id == issue_id).delete()
+                        
+                        # Process changelog histories
+                        histories = changelog_item.get("histories", [])
+                        for history in histories:
+                            changelog_id = history.get("id")
+                            created = history.get("created")
+                            
+                            # Parse created date
+                            created_dt = None
+                            if created:
+                                try:
+                                    # Remove timezone info for SQLite compatibility
+                                    created_str = created.split('+')[0].split('.')[0]
+                                    created_dt = datetime.fromisoformat(created_str)
+                                except Exception:
+                                    continue
+                            
+                            # Process each field change in this history
+                            items = history.get("items", [])
+                            for item in items:
+                                field_name = item.get("field")
+                                if not field_name or not created_dt:
+                                    continue
+                                    
+                                new_changelog = Changelog(
+                                    issue_id=issue_id,
+                                    jira_changelog_id=changelog_id,
+                                    field_name=field_name,
+                                    from_value=item.get("fromString"),
+                                    to_value=item.get("toString"),
+                                    from_display=item.get("from"),
+                                    to_display=item.get("to"),
+                                    created_at=created_dt
+                                )
+                                db.add(new_changelog)
+                                stored_count += 1
+                        
+                        # Log changelog processing for this issue
+                        if len(items) > 0:
+                            self._log_change(db, issue_id, 'changelogs', f'{len(items)} changelog entries processed', 'changelog_added')
+                        
+                        db.commit()
+                        
+                    except Exception as e:
+                        logger.error(f"Error storing changelog for issue {issue_id}: {e}")
+                        db.rollback()
+                        continue
+                        
+        except Exception as e:
+            logger.error(f"Error storing changelogs in database: {e}")
+            
+        logger.info(f"Successfully stored {stored_count} changelog entries")
+        return stored_count
 
 
 # Global instance
