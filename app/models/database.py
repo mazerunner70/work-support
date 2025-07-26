@@ -61,6 +61,7 @@ class Issue(Base):
     updated_at = Column(DateTime)
     harvested_at = Column(DateTime, default=func.current_timestamp())
     blacklist_reason = Column(String)  # Reason issue was blacklisted, NULL if allowed
+    comments = Column(Text)  # JSON array of comments with body, created, updated
 
     # Relationship to issue type
     issue_type = relationship("IssueType", back_populates="issues")

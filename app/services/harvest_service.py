@@ -233,6 +233,7 @@ class HarvestService:
                             existing_issue.created_at = jira_issue.created
                             existing_issue.updated_at = jira_issue.updated
                             existing_issue.harvested_at = datetime.utcnow()
+                            existing_issue.comments = json.dumps([comment.model_dump() for comment in jira_issue.comments], default=str)
                             
                             logger.debug(f"Updated existing issue: {jira_issue.key}")
                         else:
@@ -252,7 +253,8 @@ class HarvestService:
                                 end_date=jira_issue.end_date,
                                 created_at=jira_issue.created,
                                 updated_at=jira_issue.updated,
-                                harvested_at=datetime.utcnow()
+                                harvested_at=datetime.utcnow(),
+                                comments=json.dumps([comment.model_dump() for comment in jira_issue.comments], default=str)
                             )
                             db.add(new_issue)
                             

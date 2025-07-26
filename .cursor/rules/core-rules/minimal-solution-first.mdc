@@ -1,0 +1,73 @@
+---
+description: Always provide minimal solutions first, then offer additional enhancements
+globs: 
+alwaysApply: true
+---
+
+# Minimal Solution First Rule
+
+## Core Principle
+
+**ALWAYS** provide the minimal, simplest solution that addresses the user's request before suggesting any enhancements or comprehensive approaches.
+
+## Implementation Requirements
+
+### 1. Minimal Solution First
+- Start with the **smallest possible change** that solves the problem
+- Avoid over-engineering or adding unnecessary complexity
+- Focus on **exactly what was asked** - nothing more, nothing less
+- Use the simplest approach that works
+
+### 2. Clear Separation
+- Implement the minimal solution **completely** first
+- Clearly separate the minimal solution from any additional suggestions
+- Show the minimal solution working before expanding
+
+### 3. Enhancement Offer Pattern
+After providing the minimal solution, **ALWAYS** follow up with:
+
+```
+✅ **Minimal Solution Complete**
+
+The basic requirement has been addressed with the simplest approach.
+
+🔧 **Additional Enhancements Available**
+
+Would you like me to suggest any further improvements such as:
+- [specific enhancement 1]
+- [specific enhancement 2] 
+- [specific enhancement 3]
+
+Or are you satisfied with the minimal solution?
+```
+
+## Examples
+
+### ❌ Wrong Approach (Over-engineered)
+User: "Add a logging statement to this function"
+Response: *Creates comprehensive logging system with multiple levels, configuration, rotation, etc.*
+
+### ✅ Correct Approach (Minimal First)
+User: "Add a logging statement to this function"
+Response: 
+1. Adds single `print()` or `logger.info()` statement
+2. Then offers: "Would you like me to enhance this with structured logging, log levels, or configuration options?"
+
+## Key Guidelines
+
+- **Question scope**: If unclear, ask for clarification rather than assuming broader requirements
+- **Resist feature creep**: Don't add "while we're at it" improvements without permission
+- **Backward compatibility**: Ensure minimal changes don't break existing functionality
+- **Simple over clever**: Choose readable, maintainable solutions over complex optimizations
+
+## Benefits of Minimal Approach
+
+- **Faster implementation**: Get working solution quickly
+- **Easier debugging**: Fewer moving parts to troubleshoot
+- **Clearer intent**: Focus on actual requirements
+- **Incremental improvement**: Build complexity only when needed
+- **User control**: Let user decide on enhancements
+
+---
+
+**Remember**: The user asked for a specific solution - deliver exactly that first, then offer to expand if they want more.

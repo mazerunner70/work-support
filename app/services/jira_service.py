@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.config.settings import config_manager
 from app.utils.jql_builder import JQLBuilder
+from app.models.schemas import JiraCommentSchema
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class JiraIssue(BaseModel):
     end_date: Optional[datetime] = None  # End date from customfield_13647
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
+    comments: List[JiraCommentSchema] = []  # Issue comments
     blacklist_reason: Optional[str] = None  # Reason issue was blacklisted, None if allowed
 
 
@@ -237,13 +239,15 @@ class JiraService:
             }
         return endpoints_info
 
-    async def search_issues(self, jql_query: str, max_results: int = 1000) -> List[JiraIssue]:
+    async def search_issues(self, jql_query: str, max_results: int = 1000, 
+                          fields: Optional[List[str]] = None) -> List[JiraIssue]:
         """
         Search for issues using JQL query with pagination support.
         
         Args:
             jql_query: JQL query string
             max_results: Maximum total results to return (default 1000, 0 = no limit)
+            fields: Optional list of fields to retrieve for efficiency
             
         Returns:
             List of JiraIssue objects
@@ -259,16 +263,16 @@ class JiraService:
             all_issues = []
             blacklisted_count = 0
             start_at = 0
-            page_size = 100  # JIRA's recommended page size
+            page_size = 100
             
             while True:
                 payload = {
                     "jql": jql_query,
                     "startAt": start_at,
                     "maxResults": page_size,
-                    "fields": [
+                    "fields": fields or [
                         "key", "summary", "assignee", "status", "labels",
-                        "issuetype", "parent", "created", "updated",
+                        "issuetype", "parent", "created", "updated", "comment",
                         "customfield_10001",  # Team field
                         "customfield_14339",  # Start date
                         "customfield_14343",  # Transition date  
@@ -337,6 +341,8 @@ class JiraService:
             logger.error(error_msg)
             raise JiraServiceError(error_msg)
 
+
+
     def _parse_issue(self, issue_data: Dict[str, Any]) -> JiraIssue:
         """Parse Jira issue data into JiraIssue object."""
         fields = issue_data.get("fields", {})
@@ -376,6 +382,9 @@ class JiraService:
         # Parse dates
         created, updated = self._parse_dates(fields, issue_data.get("key"))
         
+        # Parse comments
+        comments = self._parse_comments(fields.get("comment", {}))
+        
         return JiraIssue(
             key=issue_data.get("key", ""),
             summary=fields.get("summary", ""),
@@ -390,7 +399,8 @@ class JiraService:
             transition_date=transition_date,
             end_date=end_date,
             created=created,
-            updated=updated
+            updated=updated,
+            comments=comments
         )
 
     def _parse_dates(self, fields: Dict[str, Any], issue_key: Optional[str] = None) -> Tuple[Optional[datetime], Optional[datetime]]:
@@ -407,6 +417,45 @@ class JiraService:
             logger.warning(f"Error parsing dates for issue {issue_key or 'Unknown'}: {e}")
         
         return created, updated
+
+    def _parse_comments(self, comment_data: Dict[str, Any]) -> List[JiraCommentSchema]:
+        """Parse comments from Jira issue comment field."""
+        comments = []
+        
+        try:
+            # Jira comment field structure: {"comments": [array of comment objects]}
+            comment_list = comment_data.get("comments", [])
+            
+            for comment_obj in comment_list:
+                try:
+                    # Extract comment body (could be in body or rendered body)
+                    body = comment_obj.get("body", "")
+                    if isinstance(body, dict):
+                        # Handle ADF (Atlassian Document Format) or other structured content
+                        body = str(body)  # Convert to string representation for now
+                    
+                    # Parse comment dates
+                    created = None
+                    if created_str := comment_obj.get("created"):
+                        created = self._parse_iso_datetime(created_str)
+                    
+                    updated = None
+                    if updated_str := comment_obj.get("updated"):
+                        updated = self._parse_iso_datetime(updated_str)
+                    
+                    comments.append(JiraCommentSchema(
+                        body=body,
+                        created=created,
+                        updated=updated
+                    ))
+                except Exception as e:
+                    logger.warning(f"Error parsing individual comment: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.warning(f"Error parsing comments: {e}")
+        
+        return comments
 
     def _parse_iso_datetime(self, date_str: str) -> datetime:
         """

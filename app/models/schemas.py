@@ -6,6 +6,13 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class JiraCommentSchema(BaseModel):
+    """Jira comment schema."""
+    body: str
+    created: Optional[datetime] = None
+    updated: Optional[datetime] = None
+
+
 class TeamMemberSchema(BaseModel):
     """Team member schema."""
     id: Optional[int] = None
@@ -49,6 +56,7 @@ class IssueSchema(BaseModel):
     updated_at: Optional[datetime] = None
     harvested_at: Optional[datetime] = None
     blacklist_reason: Optional[str] = None  # Reason issue was blacklisted, None if allowed
+    comments: List[JiraCommentSchema] = Field(default_factory=list)  # Issue comments
 
     class Config:
         from_attributes = True
