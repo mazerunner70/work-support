@@ -578,6 +578,26 @@ MCP_LOG_LEVEL=INFO
 }
 ```
 
+#### MCP Rules Integration
+
+For AI agents to follow proper interaction patterns, include the MCP rules in your server documentation:
+
+```python
+# mcp_server/server.py - Add rules to server description
+server = Server("work-support")
+server.set_description("""
+Work Support MCP Server - Provides access to Jira issue data and team metrics.
+
+INTERACTION RULES:
+- Use reasonable limits (10-50 for exploration)  
+- Always provide context and interpret data
+- Check system connectivity before troubleshooting
+- Combine multiple tools for comprehensive analysis
+
+See .mcp-rules file for complete interaction guidelines.
+""")
+```
+
 #### Server Startup Script Example
 ```python
 #!/usr/bin/env python3
@@ -619,30 +639,221 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### 7. Example Use Cases
+### 7. LLM Interaction Guidelines
+
+#### MCP Tool Documentation for AI Agents
+
+When documenting MCP tools for LLM consumption, each tool should include:
+
+```json
+{
+  "name": "query_issues",
+  "description": "Query Jira issues with flexible filtering options. Use this when the user wants to find, list, or search for issues based on various criteria like team, status, assignee, or issue type.",
+  "usage_patterns": [
+    "Finding issues by team: Set team parameter to team name",
+    "Finding issues by status: Set status to 'In Progress', 'Done', 'To Do', etc.",
+    "Finding someone's work: Set assignee to their name or email",
+    "Limiting results: Always set reasonable limit (default 50, max 500)"
+  ],
+  "parameters": {
+    "assignee": {
+      "type": "string",
+      "description": "Filter by assignee name or email address",
+      "examples": ["john.doe", "jane.smith@company.com"]
+    },
+    "status": {
+      "type": "string", 
+      "description": "Filter by issue status",
+      "examples": ["To Do", "In Progress", "Done", "Blocked"]
+    },
+    "team": {
+      "type": "string",
+      "description": "Filter by team name",
+      "examples": ["Backend Team", "Frontend Team", "DevOps Team"]
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum results to return (1-500, default 50)",
+      "default": 50,
+      "range": [1, 500]
+    }
+  },
+  "response_format": {
+    "issues": "Array of issue objects with key, summary, status, assignee, etc.",
+    "total_count": "Number of issues found",
+    "timestamp": "When the query was executed"
+  },
+  "best_practices": [
+    "Always use reasonable limits to avoid overwhelming responses",
+    "Combine filters to narrow down results (e.g., team + status)",
+    "Use exact team names as they appear in the system",
+    "For large teams, consider filtering by status to get manageable results"
+  ]
+}
+```
+
+#### Common Query Patterns for LLMs
+
+##### 1. **Team Workload Analysis**
+```
+User: "How is the Backend Team doing?"
+LLM Should:
+1. Call get_team_metrics with team="Backend Team"
+2. Call query_issues with team="Backend Team" and status="In Progress"
+3. Summarize metrics and current active work
+```
+
+##### 2. **Individual Workload Check** 
+```
+User: "What is john.doe working on?"
+LLM Should:
+1. Call query_issues with assignee="john.doe" and limit=20
+2. Group by status to show current vs completed work
+3. Highlight any blocked or overdue items
+```
+
+##### 3. **Issue Investigation**
+```
+User: "Tell me about issue PROJ-123"
+LLM Should:
+1. Call get_issue_details with issue_key="PROJ-123"
+2. Include comments and changelog for full context
+3. If it has children, include them for hierarchical view
+```
+
+##### 4. **System Health Check**
+```
+User: "Is the system healthy?"
+LLM Should:
+1. Call test_connectivity to check Jira and DB status
+2. Interpret last_harvest timestamp to show data freshness
+3. Provide clear status summary
+```
+
+#### Response Interpretation Guidelines
+
+##### For Issue Lists:
+- **Empty results**: Suggest alternative filters or broader search
+- **Large results**: Summarize and offer to filter further
+- **Status distribution**: Always highlight active vs completed work
+- **Team insights**: Look for patterns in assignee distribution
+
+##### For Team Metrics:
+- **Completion rate**: Explain what constitutes "good" (>80% typically)
+- **Active issues**: Flag if unusually high workload
+- **Status breakdown**: Identify potential bottlenecks
+
+##### For System Status:
+- **Jira connectivity**: Essential for real-time data
+- **Database health**: Required for all operations  
+- **Last harvest**: Data freshness indicator (>24h may be stale)
+
+### 8. Example Use Cases
 
 #### Project Manager Queries
 ```
 "Show me all high-priority issues assigned to the frontend team that are overdue"
+→ LLM: query_issues(team="Frontend Team", status="In Progress", limit=100)
+→ Filter by dates to identify overdue items
+
 "What's the average cycle time for stories completed last month?"
+→ LLM: get_team_metrics(team="All", date_range="2024-01-01,2024-01-31")
+→ Focus on completion_rate and cycle time metrics
+
 "Which team members have the highest workload right now?"
+→ LLM: query_issues(status="In Progress", limit=200)
+→ Group by assignee and count active issues
 ```
 
 #### Developer Insights
 ```
 "Show me the change history for issue IAIPORT-123"
+→ LLM: get_issue_details(issue_key="IAIPORT-123", include_changelog=true)
+→ Present changelog in chronological order
+
 "What are the most common status transitions for bugs?" 
+→ LLM: query_issues(issue_type="Bug", limit=500)
+→ Then get_issue_details for each to analyze changelog patterns
+
 "Find all issues related to authentication that I'm assigned to"
+→ LLM: query_issues(assignee="current_user")
+→ Filter results by summary/description containing "authentication"
 ```
 
 #### Management Reporting
 ```
 "Generate a velocity report for Q1 2024 by team"
+→ LLM: get_team_metrics for each team with date_range="2024-01-01,2024-03-31"
+→ Compare completion rates and total issues across teams
+
 "What's the trend in issue completion rates over the last 6 months?"
+→ LLM: Multiple get_team_metrics calls with monthly date ranges
+→ Calculate trend analysis from completion_rate data
+
 "Which issue types take the longest to complete on average?"
+→ LLM: query_issues by different issue types
+→ Analyze created_at vs completion dates for cycle time
 ```
 
-### 7. Future Enhancements
+### 9. MCP Interaction Rules for LLMs
+
+#### Core Principles
+1. **Always start with system connectivity check** when user asks about system status
+2. **Use appropriate limits** - start with small limits (10-50) and increase if needed
+3. **Combine multiple calls** for comprehensive analysis (e.g., metrics + issue details)
+4. **Provide context** - explain what the data means, don't just return raw results
+5. **Handle errors gracefully** - if a tool fails, explain why and suggest alternatives
+
+#### Tool Usage Patterns
+
+##### query_issues
+- **Start broad, then narrow**: Begin with team/status filters, add more specific filters as needed
+- **Reasonable limits**: Use 10-50 for exploratory queries, up to 200 for analysis
+- **Combine filters**: team + status is more useful than team alone
+- **Empty results**: Suggest checking team names or expanding search criteria
+
+##### get_issue_details  
+- **Include context**: Always set include_comments=true and include_changelog=true for investigations
+- **Child issues**: Set include_children=true for epic/story hierarchies
+- **Error handling**: If issue not found, suggest checking issue key format
+
+##### get_team_metrics
+- **Date ranges**: Use ISO format YYYY-MM-DD,YYYY-MM-DD
+- **Team names**: Use exact names from the system ("Backend Team", not "backend")
+- **Interpretation**: Always explain what good/bad metrics look like
+
+##### test_connectivity
+- **Regular checks**: Call this if user reports system issues
+- **Data freshness**: Warn if last_harvest is >24 hours old
+- **Service status**: Explain what each service status means
+
+#### Response Formatting Guidelines
+
+##### Issue Summaries
+```
+✅ Good: "Found 15 issues for Backend Team: 8 In Progress, 5 Done, 2 Blocked"
+❌ Bad: Raw JSON dump of all 15 issues
+```
+
+##### Team Analysis  
+```
+✅ Good: "Backend Team: 85% completion rate (good), 12 active issues (normal workload)"
+❌ Bad: "completion_rate: 0.85, active_issues: 12"
+```
+
+##### Status Reports
+```
+✅ Good: "System healthy: Jira connected ✅, Database connected ✅, Last harvest: 2 hours ago"
+❌ Bad: "jira_connected: true, db_connected: true, last_harvest: 2024-01-15T..."
+```
+
+#### Error Handling
+- **API errors**: Explain what went wrong and suggest solutions
+- **Missing data**: Guide user to check spellings or try broader searches  
+- **Connectivity issues**: Direct user to check system status first
+- **Rate limits**: Suggest reducing query scope or waiting
+
+### 10. Future Enhancements
 
 #### Advanced Analytics
 - Predictive analytics for cycle time estimation

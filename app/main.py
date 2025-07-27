@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import config_manager
 from app.services.database_service import db_service
 from app.api.routes import router
+from app.api.mcp_routes import mcp_router
 
 # Configure logging
 logging.basicConfig(
@@ -180,6 +181,9 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(router)
+
+# Include MCP-specific routes
+app.include_router(mcp_router)
 
 # Global exception handler
 

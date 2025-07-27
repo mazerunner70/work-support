@@ -1,0 +1,175 @@
+# Work-Support MCP Server Interaction Rules
+
+## Overview
+These rules guide AI agents on how to effectively interact with the work-support MCP server to provide accurate, helpful responses about Jira issues, team metrics, and system status.
+
+## Core Tool Set
+
+### 1. query_issues
+**Purpose**: Find and list Jira issues based on filters
+**When to use**: User wants to see issues, find someone's work, check team status, or explore data
+**Best practices**:
+- Always use reasonable limits (10-50 for exploration, up to 200 for analysis)
+- Combine filters for better results (team + status > team alone)
+- Start broad, then narrow down based on results
+- If empty results, suggest checking spelling or broadening search
+
+### 2. get_issue_details  
+**Purpose**: Get comprehensive information about a specific issue
+**When to use**: User mentions a specific issue key or wants deep dive into an issue
+**Best practices**:
+- Always include comments and changelog for full context
+- Set include_children=true for epics/stories to show hierarchy
+- Present information in logical order: summary → status → history → comments
+
+### 3. get_team_metrics
+**Purpose**: Analyze team performance and workload
+**When to use**: User asks about team status, workload, productivity, or performance
+**Best practices**:
+- Use exact team names from the system
+- Format date ranges as YYYY-MM-DD,YYYY-MM-DD
+- Interpret metrics (completion rate >80% is good, explain what active issues mean)
+- Compare metrics across teams when relevant
+
+### 4. test_connectivity
+**Purpose**: Check system health and data freshness
+**When to use**: User reports issues, asks about system status, or before major queries
+**Best practices**:
+- Call this first when troubleshooting
+- Explain what each status means in plain language
+- Warn if last_harvest is >24 hours old (stale data)
+- Suggest actions if services are down
+
+## Response Guidelines
+
+### Always Provide Context
+❌ Bad: "Found 23 issues"  
+✅ Good: "Found 23 issues for Backend Team: 15 active (In Progress), 6 completed, 2 blocked"
+
+### Interpret Data, Don't Just Report It
+❌ Bad: "completion_rate: 0.85"  
+✅ Good: "85% completion rate (excellent - above 80% is considered good)"
+
+### Summarize Large Results
+❌ Bad: Listing all 50 issues individually  
+✅ Good: "Found 50 issues. Breaking down by status: 30 In Progress, 15 Done, 5 Blocked. Top assignees: John (12), Sarah (8), Mike (6)"
+
+### Use Structured Responses
+For team analysis:
+```
+Backend Team Status:
+📊 Metrics: 85% completion rate, 12 active issues  
+🔄 Current Work: 8 In Progress, 2 In Review, 2 Blocked
+👥 Team Load: Evenly distributed across 5 developers
+⚠️  Concerns: 2 blocked issues need attention
+```
+
+## Query Patterns
+
+### Team Workload Analysis
+```
+1. get_team_metrics(team="Team Name")
+2. query_issues(team="Team Name", status="In Progress", limit=50)
+3. Analyze and summarize workload distribution
+```
+
+### Individual Developer Check
+```
+1. query_issues(assignee="developer.name", limit=30)
+2. Group by status, highlight any blockers
+3. Check if workload is reasonable (5-10 active issues typical)
+```
+
+### Issue Investigation
+```
+1. get_issue_details(issue_key="KEY-123", include_comments=true, include_changelog=true)
+2. If epic/parent, get children too
+3. Present timeline of changes and current status
+```
+
+### System Health Check
+```
+1. test_connectivity()
+2. Interpret results in user-friendly language
+3. If issues found, suggest next steps
+```
+
+## Error Handling
+
+### Common Errors and Responses
+
+**Issue not found**: "Issue KEY-123 not found. Please check the issue key format (e.g., PROJ-123)."
+
+**Team not found**: "Team 'XYZ' not found. Try exact team names like 'Backend Team' or 'Frontend Team'."
+
+**Empty results**: "No issues found with those filters. Try broadening the search - maybe check team names or remove some filters."
+
+**API down**: "System connectivity issue detected. Jira API appears to be down. Please try again in a few minutes."
+
+**Stale data**: "⚠️ Data was last updated 2 days ago. Results may not reflect recent changes. Consider triggering a fresh harvest."
+
+## Best Practices by Use Case
+
+### Daily Standup Support
+- Query each team member's active issues (status="In Progress")
+- Highlight blockers or overdue items
+- Summarize team progress and obstacles
+
+### Sprint Planning
+- Get team metrics for velocity estimation
+- Check issue hierarchy (epics → stories → tasks)
+- Analyze historical completion rates
+
+### Incident Response
+- Check system connectivity first
+- Get issue details with full changelog
+- Look for related issues or patterns
+
+### Management Reporting
+- Use date ranges for period analysis
+- Compare teams and metrics
+- Provide trend analysis and insights
+
+## Data Interpretation Guidelines
+
+### Completion Rates
+- >90%: Excellent
+- 80-90%: Good
+- 70-80%: Average
+- <70%: Needs attention
+
+### Active Issues per Developer
+- 3-5: Light workload
+- 6-10: Normal workload
+- 11-15: Heavy workload
+- >15: Overloaded
+
+### System Health
+- All green: System healthy
+- Jira down: Can't get fresh data
+- DB down: No data available
+- Stale harvest: Data may be outdated
+
+## Advanced Usage Patterns
+
+### Trend Analysis
+- Make multiple get_team_metrics calls with different date ranges
+- Compare completion rates over time
+- Identify patterns in team performance
+
+### Cross-Team Analysis
+- Query multiple teams and compare metrics
+- Look for resource allocation opportunities
+- Identify high-performing practices to share
+
+### Issue Lifecycle Analysis
+- Get detailed changelog for representative issues
+- Analyze time spent in each status
+- Identify bottlenecks in the workflow
+
+## Remember
+- Always explain what the data means
+- Provide actionable insights, not just numbers
+- Consider the user's role (developer vs manager vs PM)
+- Be proactive in suggesting next steps
+- Keep responses concise but informative 
