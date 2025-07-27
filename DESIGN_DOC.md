@@ -114,7 +114,6 @@ CREATE TABLE reload_tracking (
 - **Authentication**: API Token + Email
 - **Endpoints Used**:
   - `GET /rest/api/3/search` - Search issues by JQL query
-  - `GET /rest/api/3/issuetype` - Get issue type information
 - **Rate Limiting**: Respect Jira's rate limits
 - **Hierarchical Issue Types**: Support for parent-child issue type relationships
 
@@ -471,7 +470,14 @@ work-support/
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── github_service.py   # GitHub API integration
-│   │   ├── jira_service.py     # Jira API integration
+│   │   ├── jira/              # Modular Jira API integration
+│   │   │   ├── service.py     # Main service orchestrator
+│   │   │   ├── client.py      # HTTP client & authentication
+│   │   │   ├── parsers.py     # Data parsing & transformation
+│   │   │   └── operations/    # Specialized operations
+│   │   │       ├── search.py  # Search operations
+│   │   │       ├── changelog.py # Changelog operations
+│   │   │       └── metadata.py # Connection & metadata
 │   │   ├── harvest_service.py  # Data harvesting logic
 │   │   └── hierarchy_service.py # Hierarchical issue traversal
 │   ├── api/

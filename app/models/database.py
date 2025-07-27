@@ -49,7 +49,7 @@ class Comment(Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    issue_key = Column(String, ForeignKey('issues.issue_key'), nullable=False)
+    issue_key = Column(String, ForeignKey('jira_issues.issue_key'), nullable=False)
     body = Column(Text, nullable=False)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime)
@@ -64,15 +64,15 @@ class Comment(Base):
 
 class Changelog(Base):
     """Changelog table for issue change history."""
-    __tablename__ = "changelogs"
+    __tablename__ = "jira_changelogs"
     __table_args__ = (
-        Index('ix_changelogs_created_at', 'created_at'),
-        Index('ix_changelogs_issue_created', 'issue_id', 'created_at'),
-        Index('ix_changelogs_field', 'field_name'),
+        Index('ix_jira_changelogs_created_at', 'created_at'),
+        Index('ix_jira_changelogs_issue_created', 'issue_id', 'created_at'),
+        Index('ix_jira_changelogs_field', 'field_name'),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    issue_id = Column(String, ForeignKey('issues.issue_id'), nullable=False)  # Maps to Jira issueId
+    issue_id = Column(String, ForeignKey('jira_issues.issue_id'), nullable=False)  # Maps to Jira issueId
     jira_changelog_id = Column(String, nullable=False)  # Jira changelog ID
     field_name = Column(String, nullable=False)  # Field that changed (status, assignee, etc.)
     from_value = Column(Text)  # Previous value
@@ -99,7 +99,7 @@ class ChangesLog(Base):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    issue_key = Column(String, ForeignKey('issues.issue_key'), nullable=False)
+    issue_key = Column(String, ForeignKey('jira_issues.issue_key'), nullable=False)
     timestamp = Column(DateTime, default=func.current_timestamp(), nullable=False)
     field_name = Column(String, nullable=False)  # Field that changed (status, assignee, comments, changelogs, etc.)
     updated_value = Column(Text)  # New value as string
@@ -114,12 +114,12 @@ class ChangesLog(Base):
 
 class Issue(Base):
     """Issues table."""
-    __tablename__ = "issues"
+    __tablename__ = "jira_issues"
     __table_args__ = (
-        Index('ix_issues_issue_id', 'issue_id'),  # Index for issue_id lookups
-        Index('ix_issues_start_date', 'start_date'),  # Index for start date queries
-        Index('ix_issues_transition_date', 'transition_date'),  # Index for transition date queries
-        Index('ix_issues_end_date', 'end_date'),  # Index for end date queries
+        Index('ix_jira_issues_issue_id', 'issue_id'),  # Index for issue_id lookups
+        Index('ix_jira_issues_start_date', 'start_date'),  # Index for start date queries
+        Index('ix_jira_issues_transition_date', 'transition_date'),  # Index for transition date queries
+        Index('ix_jira_issues_end_date', 'end_date'),  # Index for end date queries
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)

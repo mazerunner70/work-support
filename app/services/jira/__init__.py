@@ -1,6 +1,6 @@
-# Database models package
-
-# Import Jira API models
+"""
+Jira service package for API integration and data harvesting.
+"""
 from app.models.jira import (
     JiraIssue,
     JiraServiceError,
@@ -11,15 +11,19 @@ from app.models.jira import (
     JiraChangelogResponse,
     JiraEndpointInfo
 )
+from app.services.jira.service import JiraService, jira_service
 
 __all__ = [
-    # Jira API models
+    # Models and exceptions
     "JiraIssue",
-    "JiraServiceError",
-    "JiraEndpointNotWhitelistedError", 
+    "JiraServiceError", 
+    "JiraEndpointNotWhitelistedError",
     "JiraParsingError",
     "JiraValidationError",
     "JiraSearchResponse",
     "JiraChangelogResponse",
-    "JiraEndpointInfo"
-]
+    "JiraEndpointInfo",
+    # Services
+    "JiraService",
+    "jira_service"
+] 

@@ -387,11 +387,15 @@ class JiraService:
         # Parse comments
         comments = self._parse_comments(fields.get("comment", {}))
         
+        # Map assignee to anonymised name
+        from app.config.settings import config_manager
+        anonymised_assignee = config_manager.get_anonymised_name_for_assignee(assignee) if assignee else assignee
+
         return JiraIssue(
             key=issue_data.get("key", ""),
             issue_id=issue_data.get("id"),
             summary=fields.get("summary", ""),
-            assignee=assignee,
+            assignee=anonymised_assignee,
             status=fields.get("status", {}).get("name", "Unknown"),
             labels=fields.get("labels", []),
             issue_type_id=issue_type_id,
@@ -616,37 +620,86 @@ class JiraService:
         for i in range(0, len(issue_ids), chunk_size):
             chunk = issue_ids[i:i + chunk_size]
             
-            payload = {
-                "issueIds": chunk
-            }
-            
             logger.info(f"Fetching changelogs for {len(chunk)} issues (chunk {i//chunk_size + 1})")
             
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    url = self._build_api_url(endpoint)
-                    headers = self._get_auth_headers()
-                    
-                    response = await client.post(url, headers=headers, json=payload)
-                    response.raise_for_status()
-                    
-                    chunk_data = response.json()
-                    
-                    # Extract changelog data
-                    if "values" in chunk_data:
-                        all_changelogs.extend(chunk_data["values"])
-                    
-                    # Rate limiting - small delay between chunks
-                    if i + chunk_size < len(issue_ids):
+            # Handle pagination within each chunk
+            next_page_token = None
+            chunk_total_changelogs = 0
+            page_num = 1
+            
+            while True:  # Continue until no more pages
+                payload = {
+                    "issueIdsOrKeys": chunk,
+                    "maxResults": 1000  # Request maximum results per page
+                }
+                
+                # Add pagination token if we have one
+                if next_page_token:
+                    payload["nextPageToken"] = next_page_token
+                
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        url = self._build_api_url(endpoint)
+                        headers = self._get_auth_headers()
+                        
+                        response = await client.post(url, headers=headers, json=payload)
+                        response.raise_for_status()
+                        
+                        chunk_data = response.json()
+                        
+                        # Log response parsing details
+                        if isinstance(chunk_data, dict):
+                            if "values" in chunk_data:
+                                values = chunk_data["values"]
+                                if isinstance(values, list):
+                                    logger.info(f"🔍 PARSE: Found {len(values)} changelog entries in response")
+                                    if len(values) > 0:
+                                        first_entry = values[0]
+                                        if isinstance(first_entry, dict):
+                                            logger.info(f"🔍 PARSE: Changelog entry structure: {list(first_entry.keys())}")
+                                    else:
+                                        logger.warning(f"🔍 PARSE: Response values array is empty - no changelog data")
+                                else:
+                                    logger.error(f"🔍 PARSE: Response values is not a list: {type(values)}")
+                            else:
+                                logger.error(f"🔍 PARSE: Response missing 'values' key - available keys: {list(chunk_data.keys())}")
+                        else:
+                            logger.error(f"🔍 PARSE: Response is not a JSON object: {type(chunk_data)}")
+                        
+                        # Extract changelog data
+                        page_changelogs_count = 0
+                        if "values" in chunk_data:
+                            page_changelogs = chunk_data["values"]
+                            all_changelogs.extend(page_changelogs)
+                            page_changelogs_count = len(page_changelogs)
+                            chunk_total_changelogs += page_changelogs_count
+                        
+                        logger.info(f"Loaded {page_changelogs_count} changelog entries from chunk {i//chunk_size + 1}, page {page_num}")
+                        
+                        # Check for next page
+                        next_page_token = chunk_data.get("nextPageToken")
+                        if not next_page_token:
+                            break  # No more pages
+                        
+                        page_num += 1
+                        
+                        # Rate limiting between pages
                         await asyncio.sleep(0.1)
                         
-            except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP error fetching changelogs for chunk {i//chunk_size + 1}: {e}")
-                # Continue with next chunk rather than failing entirely
-                continue
-            except Exception as e:
-                logger.error(f"Error fetching changelogs for chunk {i//chunk_size + 1}: {e}")
-                continue
+                except httpx.HTTPStatusError as e:
+                    logger.error(f"HTTP error fetching changelogs for chunk {i//chunk_size + 1}, page {page_num}: {e}")
+                    break  # Exit pagination loop on error
+                except Exception as e:
+                    logger.error(f"Error fetching changelogs for chunk {i//chunk_size + 1}, page {page_num}: {e}")
+                    break  # Exit pagination loop on error
+            
+            logger.info(f"Chunk {i//chunk_size + 1} complete: {chunk_total_changelogs} total changelog entries across {page_num} pages")
+            
+            # Rate limiting - small delay between chunks
+            if i + chunk_size < len(issue_ids):
+                await asyncio.sleep(0.2)
+        
+        logger.info(f"🔍 PARSE: Total changelog entries parsed: {len(all_changelogs)} from {len(issue_ids)} issues")
         
         logger.info(f"Successfully fetched changelogs for {len(all_changelogs)} issue/changelog combinations")
         return all_changelogs

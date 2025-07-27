@@ -6,7 +6,7 @@ from typing import List, Dict, Set, Optional
 import json
 
 from app.config.issue_types import get_issue_type_by_id, get_child_type_ids, ISSUE_TYPES
-from app.services.jira_service import jira_service, JiraIssue, JiraServiceError
+from app.services.jira import jira_service, JiraIssue, JiraServiceError
 
 logger = logging.getLogger(__name__)
 

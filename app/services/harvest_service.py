@@ -8,7 +8,8 @@ from typing import List, Dict, Tuple, Optional, Any
 from datetime import datetime
 
 from app.config.settings import config_manager
-from app.services.jira_service import jira_service, JiraIssue, JiraServiceError
+from app.services.jira.service import jira_service
+from app.models.jira import JiraIssue, JiraServiceError
 from app.services.hierarchy_service import hierarchy_service, HierarchyServiceError
 from app.services.database_service import db_service
 from app.models.database import Issue, HarvestJob, Comment, Changelog, ChangesLog
@@ -70,11 +71,13 @@ class HarvestService:
             total_records += hierarchical_records
             logger.info(f"✅ PHASE 1 COMPLETED - {hierarchical_records} hierarchical issues processed")
 
-            # Phase 2: Team member specific harvest
-            logger.info("👥 PHASE 2 - Team member specific harvest starting...")
-            team_member_records = await self._harvest_team_member_issues()
-            total_records += team_member_records
-            logger.info(f"✅ PHASE 2 COMPLETED - {team_member_records} team member issues processed")
+            # Phase 2: Team member specific harvest - DISABLED
+            # logger.info("👥 PHASE 2 - Team member specific harvest starting...")
+            # team_member_records = await self._harvest_team_member_issues()
+            # total_records += team_member_records
+            # logger.info(f"✅ PHASE 2 COMPLETED - {team_member_records} team member issues processed")
+            logger.info("👥 PHASE 2 - Team member specific harvest SKIPPED (disabled)")
+            team_member_records = 0
 
             # Phase 3: Bulk changelog harvest for non-blacklisted issues
             logger.info("📝 PHASE 3 - Bulk changelog harvest starting...")
@@ -370,10 +373,9 @@ class HarvestService:
             # Test Jira connection
             result["jira_connected"] = await self.jira_service.test_connection()
             
-            # Get issue types from Jira
-            if result["jira_connected"]:
-                jira_issue_types = await self.jira_service.get_issue_types()
-                result["issue_types_count"] = len(jira_issue_types)
+            # Get issue types from static configuration
+            from app.config.issue_types import ISSUE_TYPES
+            result["issue_types_count"] = len(ISSUE_TYPES)
 
             # Validate hierarchy
             validation = self.hierarchy_service.validate_hierarchy_integrity()
@@ -391,29 +393,59 @@ class HarvestService:
             return result
 
     def _save_comments_to_table(self, db, issue_key: str, jira_comments: List) -> None:
-        """Save comments to the separate comments table."""
+        """Save comments to the separate comments table using UPDATE strategy."""
         try:
-            # Delete existing comments for this issue
-            deleted_count = db.query(Comment).filter(Comment.issue_key == issue_key).count()
-            db.query(Comment).filter(Comment.issue_key == issue_key).delete()
+            # Get existing comments for this issue
+            existing_comments = db.query(Comment).filter(Comment.issue_key == issue_key).all()
+            existing_by_jira_id = {comment.jira_comment_id: comment for comment in existing_comments if comment.jira_comment_id}
             
-            # Add new comments and log each one
-            comment_count = 0
+            new_count = 0
+            updated_count = 0
+            
             for comment in jira_comments:
-                if comment.body:  # Only save comments with content
+                if not comment.body:  # Skip comments without content
+                    continue
+                    
+                jira_comment_id = getattr(comment, 'id', None)
+                
+                if jira_comment_id and jira_comment_id in existing_by_jira_id:
+                    # Update existing comment if it has changed
+                    existing_comment = existing_by_jira_id[jira_comment_id]
+                    
+                    # Check if comment needs updating
+                    needs_update = (
+                        existing_comment.body != comment.body or
+                        existing_comment.updated_at != comment.updated
+                    )
+                    
+                    if needs_update:
+                        existing_comment.body = comment.body
+                        existing_comment.updated_at = comment.updated
+                        updated_count += 1
+                        
+                else:
+                    # Create new comment
                     new_comment = Comment(
                         issue_key=issue_key,
                         body=comment.body,
                         created_at=comment.created,
                         updated_at=comment.updated,
-                        jira_comment_id=getattr(comment, 'id', None)  # If comment has an ID
+                        jira_comment_id=jira_comment_id
                     )
                     db.add(new_comment)
-                    comment_count += 1
+                    new_count += 1
             
-            # Log comment changes
-            if comment_count > 0:
-                self._log_change(db, issue_key, 'comments', f'{comment_count} comments processed', 'comment_added')
+            # Log comment changes with more accurate information
+            if new_count > 0 or updated_count > 0:
+                change_details = []
+                if new_count > 0:
+                    change_details.append(f'{new_count} new')
+                if updated_count > 0:
+                    change_details.append(f'{updated_count} updated')
+                
+                change_message = f"{', '.join(change_details)} comments processed"
+                change_type = 'comment_added' if new_count > 0 else 'comment_updated'
+                self._log_change(db, issue_key, 'comments', change_message, change_type)
                     
         except Exception as e:
             logger.error(f"Error saving comments for issue {issue_key}: {e}")
@@ -497,7 +529,7 @@ class HarvestService:
 
     def _store_changelogs_in_database(self, changelog_data: List[Dict[str, Any]]) -> int:
         """
-        Store changelog data in the database.
+        Store changelog data in the database using UPDATE strategy.
         
         Args:
             changelog_data: List of changelog data from Jira API
@@ -508,7 +540,8 @@ class HarvestService:
         if not changelog_data:
             return 0
             
-        stored_count = 0
+        new_count = 0
+        updated_count = 0
         
         try:
             with self.db_service.get_db_session() as db:
@@ -518,8 +551,16 @@ class HarvestService:
                         if not issue_id:
                             continue
                             
-                        # Delete existing changelogs for this issue
-                        db.query(Changelog).filter(Changelog.issue_id == issue_id).delete()
+                        # Get existing changelogs for this issue
+                        existing_changelogs = db.query(Changelog).filter(Changelog.issue_id == issue_id).all()
+                        existing_by_key = {}
+                        for changelog in existing_changelogs:
+                            # Use composite key: jira_changelog_id + field_name
+                            key = f"{changelog.jira_changelog_id}:{changelog.field_name}"
+                            existing_by_key[key] = changelog
+                        
+                        issue_new_count = 0
+                        issue_updated_count = 0
                         
                         # Process changelog histories
                         histories = changelog_item.get("histories", [])
@@ -543,23 +584,60 @@ class HarvestService:
                                 field_name = item.get("field")
                                 if not field_name or not created_dt:
                                     continue
+                                
+                                # Create composite key for matching
+                                composite_key = f"{changelog_id}:{field_name}"
+                                
+                                if composite_key in existing_by_key:
+                                    # Update existing changelog if it has changed
+                                    existing_changelog = existing_by_key[composite_key]
                                     
-                                new_changelog = Changelog(
-                                    issue_id=issue_id,
-                                    jira_changelog_id=changelog_id,
-                                    field_name=field_name,
-                                    from_value=item.get("fromString"),
-                                    to_value=item.get("toString"),
-                                    from_display=item.get("from"),
-                                    to_display=item.get("to"),
-                                    created_at=created_dt
-                                )
-                                db.add(new_changelog)
-                                stored_count += 1
+                                    # Check if changelog needs updating
+                                    needs_update = (
+                                        existing_changelog.from_value != item.get("fromString") or
+                                        existing_changelog.to_value != item.get("toString") or
+                                        existing_changelog.from_display != item.get("from") or
+                                        existing_changelog.to_display != item.get("to") or
+                                        existing_changelog.created_at != created_dt
+                                    )
+                                    
+                                    if needs_update:
+                                        existing_changelog.from_value = item.get("fromString")
+                                        existing_changelog.to_value = item.get("toString")
+                                        existing_changelog.from_display = item.get("from")
+                                        existing_changelog.to_display = item.get("to")
+                                        existing_changelog.created_at = created_dt
+                                        existing_changelog.harvested_at = datetime.utcnow()
+                                        updated_count += 1
+                                        issue_updated_count += 1
+                                        
+                                else:
+                                    # Create new changelog entry
+                                    new_changelog = Changelog(
+                                        issue_id=issue_id,
+                                        jira_changelog_id=changelog_id,
+                                        field_name=field_name,
+                                        from_value=item.get("fromString"),
+                                        to_value=item.get("toString"),
+                                        from_display=item.get("from"),
+                                        to_display=item.get("to"),
+                                        created_at=created_dt
+                                    )
+                                    db.add(new_changelog)
+                                    new_count += 1
+                                    issue_new_count += 1
                         
-                        # Log changelog processing for this issue
-                        if len(items) > 0:
-                            self._log_change(db, issue_id, 'changelogs', f'{len(items)} changelog entries processed', 'changelog_added')
+                        # Log changelog processing for this issue with more accurate information
+                        if issue_new_count > 0 or issue_updated_count > 0:
+                            change_details = []
+                            if issue_new_count > 0:
+                                change_details.append(f'{issue_new_count} new')
+                            if issue_updated_count > 0:
+                                change_details.append(f'{issue_updated_count} updated')
+                            
+                            change_message = f"{', '.join(change_details)} changelog entries processed"
+                            change_type = 'changelog_added' if issue_new_count > 0 else 'changelog_updated'
+                            self._log_change(db, issue_id, 'changelogs', change_message, change_type)
                         
                         db.commit()
                         
@@ -571,8 +649,9 @@ class HarvestService:
         except Exception as e:
             logger.error(f"Error storing changelogs in database: {e}")
             
-        logger.info(f"Successfully stored {stored_count} changelog entries")
-        return stored_count
+        total_stored = new_count + updated_count
+        logger.info(f"Successfully processed {total_stored} changelog entries ({new_count} new, {updated_count} updated)")
+        return total_stored
 
 
 # Global instance
