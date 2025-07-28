@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "work-support": {
+      "command": "bash",
+      "args": ["scripts/run_mcp_server.sh"],
+      "cwd": "/absolute/path/to/work-support",
+      "env": {
+        "WORK_SUPPORT_URL": "http://localhost:8000"
+      }
+    }
+  }
+} 

@@ -22,6 +22,11 @@ logging.basicConfig(
     ]
 )
 
+# Enable SQLAlchemy SQL logging
+if config_manager.settings.server_debug:
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 
@@ -127,32 +132,13 @@ async def lifespan(app: FastAPI):
 
 
 async def initialize_issue_types():
-    """Initialize issue types in the database."""
+    """Initialize and sync issue types in the database."""
     try:
-        from app.config.issue_types import ISSUE_TYPES
-        from app.models.database import IssueType
-        import json
+        from app.services.issue_type_sync_service import IssueTypeSyncService
 
         with db_service.get_db_session() as db:
-            # Check if issue types are already initialized
-            existing_count = db.query(IssueType).count()
-
-            if existing_count == 0:
-                logger.info("Initializing issue types in database...")
-
-                for issue_type_config in ISSUE_TYPES:
-                    db_issue_type = IssueType(
-                        id=issue_type_config.id,
-                        name=issue_type_config.name,
-                        url=issue_type_config.url,
-                        child_type_ids=json.dumps(issue_type_config.child_type_ids)
-                    )
-                    db.add(db_issue_type)
-
-                db.commit()
-                logger.info(f"Initialized {len(ISSUE_TYPES)} issue types")
-            else:
-                logger.info(f"Issue types already initialized ({existing_count} found)")
+            # Always sync issue types to ensure they're up to date
+            IssueTypeSyncService.sync_on_startup(db)
 
     except Exception as e:
         logger.error(f"Error initializing issue types: {e}")

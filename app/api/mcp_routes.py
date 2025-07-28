@@ -5,6 +5,7 @@ These endpoints are optimized for MCP (Model Context Protocol) clients,
 providing clean JSON responses with consistent formatting for AI agents.
 """
 import logging
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -148,6 +149,47 @@ async def mcp_get_issue_details(
         return MCPResponseFormatter.format_error_response(
             "internal_error",
             "An unexpected error occurred while retrieving issue details"
+        )
+
+
+@mcp_router.get("/issues/{issue_key}/descendants")
+async def mcp_get_issue_descendants(
+    issue_key: str,
+    db: Session = Depends(get_db),
+    include_comments: bool = Query(True, description="Include comments for each issue"),
+    include_changelog: bool = Query(True, description="Include changelog entries for each issue")
+):
+    """
+    Get all descendant issues recursively from a root issue - optimized for MCP clients.
+    
+    Returns the root issue and all its descendants with comments and changelog if requested.
+    """
+    try:
+        from app.services.descendant_service import descendant_service
+        
+        result = descendant_service.get_all_descendants(
+            db=db,
+            root_issue_key=issue_key,
+            include_comments=include_comments,
+            include_changelog=include_changelog
+        )
+        
+        if "error" in result:
+            return MCPResponseFormatter.format_error_response(
+                "not_found",
+                result["error"]
+            )
+        
+        # Add timestamp for MCP response
+        result["timestamp"] = datetime.utcnow().isoformat()
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Unexpected error getting descendants for {issue_key}: {e}")
+        return MCPResponseFormatter.format_error_response(
+            "internal_error",
+            "An unexpected error occurred while retrieving descendants"
         )
 
 
@@ -320,4 +362,143 @@ async def mcp_trigger_harvest(
             "harvest_error",
             f"Failed to trigger {harvest_type} harvest",
             {"error": str(e)}
+        ) 
+
+
+@mcp_router.get("/issues/search/by-comments")
+async def mcp_search_issues_by_comments(
+    db: Session = Depends(get_db),
+    days_ago: int = Query(10, ge=1, le=365, description="Find issues with comments within this many days"),
+    limit: int = Query(50, ge=1, le=500, description="Maximum number of results")
+):
+    """
+    Search issues that have comments within a specified time period.
+    Returns issues with their recent comments.
+    
+    Useful for finding active issues or issues that need attention.
+    """
+    try:
+        from datetime import datetime, timedelta
+        from sqlalchemy import func, and_
+        from sqlalchemy.orm import joinedload
+        from app.models.database import Issue, Comment, IssueType
+        from collections import defaultdict
+        
+        # Calculate the date threshold
+        threshold_date = datetime.utcnow() - timedelta(days=days_ago)
+        
+        # Query comments from the last X days and join with their issues
+        query = db.query(Comment, Issue).join(
+            Issue, Comment.issue_key == Issue.issue_key
+        ).outerjoin(
+            IssueType, Issue.issue_type_id == IssueType.id
+        ).filter(
+            Comment.created_at >= threshold_date
+        ).options(
+            joinedload(Issue.issue_type)
+        )
+        
+        # Order by comment creation date (most recent first)
+        query = query.order_by(Comment.created_at.desc())
+        
+        # Log the SQL query for debugging
+        logger.info(f"SQL Query2 for search_by_comments: {query}")
+        
+        # Execute query
+        results = query.all()
+        
+        # Group comments by issue
+        issues_with_comments = defaultdict(lambda: {"issue": None, "comments": []})
+        
+        for comment, issue in results:
+            issue_key = issue.issue_key
+            
+            # Set the issue (will be the same for all comments of this issue)
+            if issues_with_comments[issue_key]["issue"] is None:
+                issues_with_comments[issue_key]["issue"] = issue
+            
+            # Add the comment
+            issues_with_comments[issue_key]["comments"].append(comment)
+        
+        # Convert to list and apply limit
+        issues_list = list(issues_with_comments.values())[:limit]
+        
+        # Format response for MCP with comments included
+        response_data = {
+            "issues": [],
+            "total_count": len(issues_list),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        for item in issues_list:
+            issue = item["issue"]
+            comments = item["comments"]
+            
+            # Format the issue
+            issue_data = MCPResponseFormatter.format_issue(issue, include_details=False)
+            
+            # Add the recent comments
+            issue_data["recent_comments"] = [
+                {
+                    "id": comment.id,
+                    "body": comment.body,
+                    "created_at": comment.created_at.isoformat(),
+                    "updated_at": comment.updated_at.isoformat() if comment.updated_at else None,
+                    "jira_comment_id": comment.jira_comment_id
+                }
+                for comment in comments
+            ]
+            issue_data["recent_comments_count"] = len(comments)
+            
+            response_data["issues"].append(issue_data)
+        
+        return response_data
+        
+    except SQLAlchemyError as e:
+        logger.error(f"Database error in MCP comment search: {e}")
+        return MCPResponseFormatter.format_error_response(
+            "database_error",
+            "Failed to search issues by comments"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in MCP comment search: {e}")
+        return MCPResponseFormatter.format_error_response(
+            "internal_error",
+            "An unexpected error occurred while searching issues by comments"
+        )
+
+
+@mcp_router.get("/issue-types")
+async def mcp_get_issue_types():
+    """
+    Get all issue types with their IDs - optimized for MCP clients.
+    
+    Returns a list of all issue types from the hardcoded configuration,
+    useful for understanding the issue type hierarchy and for filtering queries.
+    """
+    try:
+        from app.config.issue_types import ISSUE_TYPES
+        
+        # Format the response using hardcoded data
+        issue_types_data = []
+        for issue_type in ISSUE_TYPES:
+            issue_types_data.append({
+                "id": issue_type.id,
+                "name": issue_type.name,
+                "url": issue_type.url,
+                "child_type_ids": issue_type.child_type_ids,
+                "is_leaf": len(issue_type.child_type_ids) == 0
+            })
+        
+        return {
+            "issue_types": issue_types_data,
+            "total_count": len(issue_types_data),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Unexpected error in MCP issue types query: {e}")
+        return MCPResponseFormatter.format_error_response(
+            "internal_error",
+            "An unexpected error occurred while retrieving issue types"
         ) 

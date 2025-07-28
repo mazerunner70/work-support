@@ -1,0 +1,17 @@
+{
+  "cursor.mcp.servers": {
+    "work-support": {
+      "command": "bash",
+      "args": ["scripts/run_mcp_server.sh"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "WORK_SUPPORT_URL": "http://localhost:8000"
+      },
+      "description": "Work Support - Jira/GitHub data harvesting",
+      "autoStart": true,
+      "restartOnFailure": true
+    }
+  },
+  "cursor.mcp.autoStartServers": ["work-support"],
+  "cursor.mcp.enableLogging": true
+} 

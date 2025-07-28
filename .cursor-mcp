@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "work-support": {
+      "command": ["bash", "scripts/run_mcp_server.sh"],
+      "env": {
+        "WORK_SUPPORT_URL": "http://localhost:8000"
+      },
+      "description": "Work Support Server",
+      "autoStart": true
+    }
+  }
+} 

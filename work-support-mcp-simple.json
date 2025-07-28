@@ -1,0 +1,16 @@
+{
+  "name": "work-support",
+  "description": "Work Support MCP Server for Jira/GitHub data harvesting",
+  "command": ["bash", "scripts/run_mcp_server.sh"],
+  "env": {
+    "WORK_SUPPORT_URL": "http://localhost:8000"
+  },
+  "tools": [
+    "query_issues",
+    "get_harvest_status", 
+    "trigger_reload",
+    "get_team_members",
+    "filter_by_project",
+    "analyze_dates"
+  ]
+} 

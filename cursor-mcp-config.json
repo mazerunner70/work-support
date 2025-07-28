@@ -1,0 +1,18 @@
+{
+  "mcp": {
+    "servers": {
+      "work-support": {
+        "command": "bash",
+        "args": ["scripts/run_mcp_server.sh"],
+        "cwd": ".",
+        "env": {
+          "WORK_SUPPORT_URL": "http://localhost:8000"
+        },
+        "description": "Work Support - Jira/GitHub data harvesting and issue management",
+        "icon": "🔄",
+        "autoStart": true,
+        "timeout": 30000
+      }
+    }
+  }
+} 

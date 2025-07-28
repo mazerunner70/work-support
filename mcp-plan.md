@@ -795,6 +795,25 @@ LLM Should:
 → Analyze created_at vs completion dates for cycle time
 ```
 
+#### Product Version Analysis
+```
+"What product versions have I commented on since last Monday week?"
+→ LLM: query_issues(assignee="current_user", limit=200)
+→ Filter by fix_version and check changelog for user comments since last Monday
+→ Present unique product versions with comment activity
+
+"Show me all the product versions active"
+→ LLM: query_issues(status="In Progress,To Do,Review", limit=500)
+→ Extract and deduplicate fix_version/affected_version fields
+→ Present sorted list of active product versions with issue counts
+
+"For product version pro-7653 give me a summary of all descendant issues and their comments and changelog entries since 25 Jul 2025"
+→ LLM: query_issues(parent_key="pro-7653", include_children=true, limit=500)
+→ get_issue_details for each descendant with include_comments=true, include_changelog=true
+→ Filter comments and changelog entries by date >= "2025-07-25"
+→ Present hierarchical summary with recent activity highlighted
+```
+
 ### 9. MCP Interaction Rules for LLMs
 
 #### Core Principles

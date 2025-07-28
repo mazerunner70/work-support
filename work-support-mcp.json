@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "work-support": {
+      "command": "bash",
+      "args": ["scripts/run_mcp_server.sh"],
+      "cwd": ".",
+      "env": {
+        "WORK_SUPPORT_URL": "http://localhost:8000"
+      },
+      "description": "Work Support MCP Server - Provides access to Jira/GitHub data harvesting and issue management",
+      "capabilities": [
+        "Issue querying and filtering",
+        "Team member data access",
+        "Harvest status and reload operations",
+        "Project blacklist management",
+        "Date field analysis (start/transition/end dates)",
+        "Issue hierarchy and relationship mapping"
+      ],
+      "timeout": 30000,
+      "restart": true,
+      "restartDelay": 5000
+    }
+  }
+} 

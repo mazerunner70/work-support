@@ -287,6 +287,76 @@ async def get_reload_history(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/api/issues/{issue_key}")
+async def get_issue_by_key(
+    issue_key: str,
+    db: Session = Depends(get_db)
+):
+    """Get a specific issue by its key."""
+    try:
+        # Query for the issue
+        issue = db.query(Issue).filter(Issue.issue_key == issue_key).first()
+        
+        if not issue:
+            raise HTTPException(status_code=404, detail=f"Issue with key '{issue_key}' not found")
+        
+        # Return issue data
+        return {
+            "issue_key": issue.issue_key,
+            "summary": issue.summary,
+            "assignee": issue.assignee,
+            "status": issue.status,
+            "team": issue.team,
+            "source": issue.source,
+            "parent_key": issue.parent_key,
+            "labels": issue.labels,
+            "created_at": issue.created_at,
+            "updated_at": issue.updated_at,
+            "start_date": issue.start_date,
+            "transition_date": issue.transition_date,
+            "end_date": issue.end_date
+        }
+        
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error getting issue {issue_key}: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    except Exception as e:
+        logger.error(f"Error getting issue {issue_key}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/api/issues/{issue_key}/descendants")
+async def get_issue_descendants(
+    issue_key: str,
+    db: Session = Depends(get_db),
+    include_comments: bool = Query(True, description="Include comments for each issue"),
+    include_changelog: bool = Query(True, description="Include changelog entries for each issue")
+):
+    """Get all descendant issues recursively from a root issue."""
+    try:
+        from app.services.descendant_service import descendant_service
+        
+        result = descendant_service.get_all_descendants(
+            db=db,
+            root_issue_key=issue_key,
+            include_comments=include_comments,
+            include_changelog=include_changelog
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting descendants for {issue_key}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/api/harvest/test", response_model=dict)
 async def test_harvest_connectivity():
     """Test connectivity to external services for harvesting."""

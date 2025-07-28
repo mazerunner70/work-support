@@ -12,9 +12,12 @@ from app.models.database import Issue, Changelog, Comment, TeamMember, HarvestJo
 class MCPResponseFormatter:
     """Formats database objects for MCP client consumption."""
     
+
+
     @staticmethod
     def format_issue(issue: Issue, include_details: bool = False) -> Dict[str, Any]:
         """Format a single issue for MCP response."""
+        print(f"Formatting issue: {issue}")
         base_issue = {
             "issue_key": issue.issue_key,
             "issue_id": issue.issue_id,
@@ -28,7 +31,7 @@ class MCPResponseFormatter:
                 "created_at": issue.created_at.isoformat() if issue.created_at else None,
                 "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
                 "start_date": issue.start_date.isoformat() if issue.start_date else None,
-                "transition_date": issue.transition_date.isoformat() if issue.transition_date else None,
+                "transition_date": issue.transition_date,
                 "end_date": issue.end_date.isoformat() if issue.end_date else None,
                 "harvested_at": issue.harvested_at.isoformat() if issue.harvested_at else None
             }
@@ -102,7 +105,7 @@ class MCPResponseFormatter:
                     "created_at": changelog.created_at.isoformat(),
                     "harvested_at": changelog.harvested_at.isoformat() if changelog.harvested_at else None
                 }
-                for changelog in changelog.changelog_records
+                for changelog in issue.changelog_records
             ]
         
         return issue_data

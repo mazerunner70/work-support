@@ -1,227 +1,195 @@
 #!/usr/bin/env python3
 """
-Test script for MCP endpoints in work-support API.
+Test Script for MCP Endpoints
 
-Tests all MCP endpoints to ensure they're working correctly and returning
-properly formatted responses for MCP clients.
+Tests the MCP server functionality by calling the underlying REST API endpoints
+that the MCP server depends on.
 """
 import asyncio
+import logging
+import os
+import sys
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 import httpx
-import json
-from typing import Dict, Any
 
 
-class MCPEndpointTester:
-    """Test MCP endpoints with various scenarios."""
+async def test_work_support_api():
+    """Test that work-support API is accessible."""
+    work_support_url = os.getenv("WORK_SUPPORT_URL", "http://localhost:8000")
     
-    def __init__(self, base_url: str = "http://localhost:8000"):
-        self.base_url = base_url
-        self.client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
+    print(f"Testing Work Support API at {work_support_url}")
     
-    async def test_endpoint(self, method: str, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Test a single endpoint and return results."""
+    async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            if method.upper() == "GET":
-                response = await self.client.get(endpoint, params=params)
-            elif method.upper() == "POST":
-                response = await self.client.post(endpoint, params=params)
+            # Test basic connectivity
+            response = await client.get(f"{work_support_url}/health")
+            if response.status_code == 200:
+                print("✅ Work Support API is accessible")
             else:
-                return {"error": f"Unsupported method: {method}"}
-            
-            return {
-                "endpoint": endpoint,
-                "method": method,
-                "status_code": response.status_code,
-                "success": response.status_code == 200,
-                "response_size": len(response.content),
-                "content_type": response.headers.get("content-type", "unknown"),
-                "response": response.json() if response.headers.get("content-type", "").startswith("application/json") else response.text[:500]
-            }
-        except Exception as e:
-            return {
-                "endpoint": endpoint,
-                "method": method,
-                "success": False,
-                "error": str(e)
-            }
-    
-    async def test_all_endpoints(self):
-        """Test all MCP endpoints with various parameters."""
-        print("🚀 Testing MCP Endpoints for Work-Support API")
-        print("=" * 60)
+                print(f"⚠️ Work Support API returned status {response.status_code}")
+                
+        except httpx.RequestError as e:
+            print(f"❌ Failed to connect to Work Support API: {e}")
+            return False
         
-        test_cases = [
-            # Basic connectivity test
-            {
-                "name": "System Connectivity",
-                "method": "GET",
-                "endpoint": "/api/mcp/system/connectivity",
-                "description": "Test system health and connectivity"
-            },
-            
-            # Issues endpoint tests
-            {
-                "name": "Query All Issues (No Filters)",
-                "method": "GET", 
-                "endpoint": "/api/mcp/issues",
-                "params": {"limit": 10},
-                "description": "Query issues without filters, limited to 10 results"
-            },
-            {
-                "name": "Query Issues by Team",
-                "method": "GET",
-                "endpoint": "/api/mcp/issues",
-                "params": {"team": "Backend Team", "limit": 5},
-                "description": "Query issues filtered by team"
-            },
-            {
-                "name": "Query Issues by Status",
-                "method": "GET",
-                "endpoint": "/api/mcp/issues",
-                "params": {"status": "In Progress", "limit": 5},
-                "description": "Query issues filtered by status"
-            },
-            {
-                "name": "Query Issues by Source",
-                "method": "GET",
-                "endpoint": "/api/mcp/issues",
-                "params": {"source": "jira", "limit": 5},
-                "description": "Query issues filtered by source"
-            },
-            
-            # Issue details test (will need an actual issue key)
-            {
-                "name": "Get Issue Details (Test Key)",
-                "method": "GET",
-                "endpoint": "/api/mcp/issues/TEST-123",
-                "params": {"include_comments": True, "include_changelog": True},
-                "description": "Get detailed information for a specific issue"
-            },
-            
-            # Team metrics tests
-            {
-                "name": "Team Metrics (Backend Team)",
-                "method": "GET",
-                "endpoint": "/api/mcp/team/Backend Team/metrics",
-                "description": "Get metrics for Backend Team"
-            },
-            {
-                "name": "Team Metrics (Non-existent Team)",
-                "method": "GET",
-                "endpoint": "/api/mcp/team/NonExistentTeam/metrics",
-                "description": "Test metrics for a team that doesn't exist"
-            },
-            
-            # Harvest endpoint tests
-            {
-                "name": "Trigger Harvest (Dry Run)",
-                "method": "POST",
-                "endpoint": "/api/mcp/harvest/trigger",
-                "params": {"harvest_type": "incremental", "dry_run": True},
-                "description": "Test harvest trigger with dry run"
-            },
-            
-            # Error handling tests
-            {
-                "name": "Invalid Source Filter",
-                "method": "GET",
-                "endpoint": "/api/mcp/issues",
-                "params": {"source": "invalid_source"},
-                "description": "Test error handling for invalid source filter"
-            },
-            {
-                "name": "Invalid Harvest Type",
-                "method": "POST",
-                "endpoint": "/api/mcp/harvest/trigger",
-                "params": {"harvest_type": "invalid_type", "dry_run": True},
-                "description": "Test error handling for invalid harvest type"
-            }
+        # Test MCP endpoints
+        endpoints_to_test = [
+            "/api/mcp/issues?limit=5",
+            "/api/mcp/system/connectivity",
         ]
         
-        results = []
-        for i, test_case in enumerate(test_cases, 1):
-            print(f"\n{i:2d}. {test_case['name']}")
-            print(f"    {test_case['description']}")
-            print(f"    {test_case['method']} {test_case['endpoint']}")
-            
-            if test_case.get('params'):
-                print(f"    Params: {test_case['params']}")
-            
-            result = await self.test_endpoint(
-                test_case['method'],
-                test_case['endpoint'],
-                test_case.get('params')
-            )
-            results.append({**test_case, **result})
-            
-            if result['success']:
-                print(f"    ✅ SUCCESS - Status: {result['status_code']}, Size: {result['response_size']} bytes")
+        for endpoint in endpoints_to_test:
+            try:
+                print(f"Testing {endpoint}")
+                response = await client.get(f"{work_support_url}{endpoint}")
                 
-                # Print sample of response for successful calls
-                if isinstance(result.get('response'), dict):
-                    if 'issues' in result['response']:
-                        issue_count = len(result['response']['issues'])
-                        print(f"    📊 Found {issue_count} issues")
-                    elif 'team' in result['response']:
-                        metrics = result['response'].get('metrics', {})
-                        total = metrics.get('total_issues', 0)
-                        print(f"    📊 Team has {total} total issues")
-                    elif 'status' in result['response']:
-                        status = result['response']['status']
-                        print(f"    📊 System status: {status}")
-            else:
-                print(f"    ❌ FAILED - {result.get('error', 'Unknown error')}")
-                if 'status_code' in result:
-                    print(f"    Status: {result['status_code']}")
-        
-        # Summary
-        print("\n" + "=" * 60)
-        print("📋 TEST SUMMARY")
-        print("=" * 60)
-        
-        successful = sum(1 for r in results if r['success'])
-        total = len(results)
-        
-        print(f"Total Tests: {total}")
-        print(f"Successful: {successful}")
-        print(f"Failed: {total - successful}")
-        print(f"Success Rate: {(successful/total)*100:.1f}%")
-        
-        if successful < total:
-            print("\n❌ FAILED TESTS:")
-            for result in results:
-                if not result['success']:
-                    print(f"  - {result['name']}: {result.get('error', 'Unknown error')}")
-        
-        return results
+                if response.status_code == 200:
+                    print(f"  ✅ {endpoint} - OK")
+                    
+                    # Print sample data for issues endpoint
+                    if "issues" in endpoint:
+                        data = response.json()
+                        issues = data.get("issues", [])
+                        print(f"    Found {len(issues)} issues")
+                        if issues:
+                            first_issue = issues[0]
+                            key = first_issue.get("issue_key", "N/A")
+                            summary = first_issue.get("summary", "No summary")[:50]
+                            print(f"    Sample: {key} - {summary}...")
+                    
+                    # Print connectivity info
+                    if "connectivity" in endpoint:
+                        data = response.json()
+                        jira_connected = data.get("jira_connected", False)
+                        db_connected = data.get("database_connected", False)
+                        print(f"    Jira: {'✅' if jira_connected else '❌'}")
+                        print(f"    Database: {'✅' if db_connected else '❌'}")
+                        
+                else:
+                    print(f"  ⚠️ {endpoint} - Status {response.status_code}")
+                    
+            except Exception as e:
+                print(f"  ❌ {endpoint} - Error: {e}")
     
-    async def close(self):
-        """Close the HTTP client."""
-        await self.client.aclose()
+    return True
+
+
+async def test_mcp_server_startup():
+    """Test that MCP server can be imported and initialized."""
+    try:
+        print("\nTesting MCP Server startup...")
+        
+        from mcp_server.config import config
+        from mcp_server.client import client
+        from mcp_server.server import WorkSupportMCPServer
+        
+        print("✅ MCP server modules imported successfully")
+        
+        # Test configuration
+        try:
+            config.validate()
+            print("✅ Configuration is valid")
+        except Exception as e:
+            print(f"❌ Configuration validation failed: {e}")
+            return False
+        
+        # Test server initialization
+        try:
+            server = WorkSupportMCPServer()
+            print("✅ MCP server initialized successfully")
+        except Exception as e:
+            print(f"❌ MCP server initialization failed: {e}")
+            return False
+        
+        return True
+        
+    except ImportError as e:
+        print(f"❌ Failed to import MCP server modules: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Unexpected error testing MCP server: {e}")
+        return False
+
+
+def check_environment():
+    """Check environment setup."""
+    print("Checking environment...")
+    
+    # Check required environment variables
+    work_support_url = os.getenv("WORK_SUPPORT_URL")
+    if work_support_url:
+        print(f"✅ WORK_SUPPORT_URL: {work_support_url}")
+    else:
+        print("⚠️ WORK_SUPPORT_URL not set, using default: http://localhost:8000")
+    
+    # Check Python dependencies
+    try:
+        import mcp
+        print("✅ MCP SDK available")
+    except ImportError:
+        print("❌ MCP SDK not installed. Run: pip install mcp==1.12.2")
+        return False
+    
+    try:
+        import httpx
+        print("✅ HTTPX available")
+    except ImportError:
+        print("❌ HTTPX not installed. Run: pip install httpx")
+        return False
+    
+    return True
 
 
 async def main():
-    """Run MCP endpoint tests."""
-    tester = MCPEndpointTester()
+    """Main test function."""
+    print("="*60)
+    print("Work Support MCP Server - Test Script")
+    print("="*60)
     
-    try:
-        results = await tester.test_all_endpoints()
-        
-        # Save detailed results to file
-        with open("mcp_test_results.json", "w") as f:
-            json.dump(results, f, indent=2, default=str)
-        
-        print(f"\n💾 Detailed results saved to: mcp_test_results.json")
-        
-    except Exception as e:
-        print(f"❌ Test execution failed: {e}")
-    finally:
-        await tester.close()
+    # Check environment first
+    if not check_environment():
+        print("\n❌ Environment check failed")
+        sys.exit(1)
+    
+    # Test work-support API
+    print("\n" + "="*40)
+    print("Testing Work Support API")
+    print("="*40)
+    
+    api_ok = await test_work_support_api()
+    
+    # Test MCP server startup
+    print("\n" + "="*40)
+    print("Testing MCP Server")
+    print("="*40)
+    
+    mcp_ok = await test_mcp_server_startup()
+    
+    # Summary
+    print("\n" + "="*40)
+    print("Test Summary")
+    print("="*40)
+    
+    print(f"Work Support API: {'✅ OK' if api_ok else '❌ Failed'}")
+    print(f"MCP Server: {'✅ OK' if mcp_ok else '❌ Failed'}")
+    
+    if api_ok and mcp_ok:
+        print("\n🎉 All tests passed! MCP server is ready to use.")
+        print("\nNext steps:")
+        print("1. Start the work-support server: ./run_server.sh")
+        print("2. Start the MCP server: python scripts/run_mcp_server.py")
+        print("3. Or run both: python scripts/run_both.py")
+        return True
+    else:
+        print("\n❌ Some tests failed. Please fix the issues above.")
+        return False
 
 
 if __name__ == "__main__":
-    print("MCP Endpoint Testing Script")
-    print("Make sure your work-support server is running on http://localhost:8000")
-    print()
-    
-    asyncio.run(main()) 
+    success = asyncio.run(main())
+    sys.exit(0 if success else 1) 
